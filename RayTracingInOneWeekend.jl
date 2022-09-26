@@ -1,29 +1,20 @@
-using Parameters, StaticArrays, LinearAlgebra, Images, FileIO
+using Parameters, StaticArrays, LinearAlgebra, Images
 
 const T = Float64
 const Point = SVector{3, T} 
 
+const Spectrum = SVector{3, T}
+
 @with_kw struct Ray @deftype Point
     origin = @SVector zeros(3)
-    direction = SA[0, 1, 0]
+    direction = Point(0, 1, 0)
     @assert norm(direction) ≈ 1
 end
 
 @with_kw struct Sphere
-    centre::Point = @SVector zeros(3)
+    centre::Point = zeros(Point, 3)
     radius::T = 0.5
 end
-
-# @with_kw struct HitRecord @deftype Point
-#     t::T
-#     object
-#     @assert norm(normal) ≈ 1 #necessary?
-# end
-
-# @with_kw struct Spectrum{N <: Int}
-#     coeffs::SVector{N, T} = @SVector zeros(3)
-# end
-const Spectrum = SVector{3, T}
 
 function intersect(sphere::Sphere, ray, tmin, tmax) # Relies on norm(ray.direction) == 1
     origin_to_centre = ray.origin - sphere.centre
@@ -60,7 +51,11 @@ function world(ray)
     return (1 - interp) * Spectrum([1, 1, 1]) + interp * Spectrum([0.5, 0.7, 1.0])
 end
 
-function rayColour(ray, HittableList, tmin=0, tmax=Inf)
+function rayColour(ray, HittableList, depth, tmin=1e-4, tmax=Inf)
+    if depth ≤ 0
+        return zeros(Spectrum)
+    end
+
     hitIndex = 0
     for (i, hittable) in enumerate(HittableList)
         t = intersect(hittable, ray, tmin, tmax) 
@@ -73,12 +68,33 @@ function rayColour(ray, HittableList, tmin=0, tmax=Inf)
     if hitIndex == 0 # nothing hit
         return world(ray)
     else
-        n = normalize(advance(ray, tmax) - HittableList[hitIndex].centre)
-        return Spectrum(([n.x, n.z, -n.y] + ones(3)) / 2)  
+        position = advance(ray, tmax)
+
+        ξ₁ = 2 * rand() - 1
+        ξ₂ = rand()
+        
+        direction = Point(cos(2π * ξ₂) * sqrt(1 - ξ₁^2), sin(2π * ξ₂) * sqrt(1 - ξ₁^2), ξ₁)
+        if direction ⋅ normal(HittableList[hitIndex], position) < 0
+            direction *= -1
+        end
+
+        # x = cos(2π * ξ₂) * sqrt(1 - ξ₁^2)
+        # y = sin(2π * ξ₂) * sqrt(1 - ξ₁^2)
+        # z = ξ₁
+        
+        # k⃗ = normal(HittableList[hitIndex], position)
+        # i⃗ = cross(k⃗, Point(0, 0, 1))
+        # j⃗ = cross(i⃗, Point(0, 0, 1))
+        # direction = x * i⃗ + y * j⃗ + z * k⃗
+
+        ray = Ray(position, direction)
+        return rayColour(ray, HittableList, depth - 1) / 2
+        # n = normalize(advance(ray, tmax) - HittableList[hitIndex].centre)
+        # return Spectrum(([n.x, n.z, -n.y] + ones(3)) / 2)  
     end
 end
 
-function render(nx, ny, camera_height = 2, camera_centre = SA[0, 1, 0], focal_length = 1)
+function render(nx, ny, camera_height = 2, camera_centre = Point(0, 1, 0), focal_length = 1)
     sphere1 = Sphere(centre=[0, 1, 0])
     sphere2 = Sphere([0, 1, -100.5], 100)
 
@@ -87,15 +103,16 @@ function render(nx, ny, camera_height = 2, camera_centre = SA[0, 1, 0], focal_le
 
     aspect_ratio = nx / ny
 
-	i⃗ = SA[camera_height * aspect_ratio, 0, 0] / nx
-	k⃗ = SA[0, 0, camera_height] / ny
+	i⃗ = Point(camera_height * aspect_ratio, 0, 0) / nx
+	k⃗ = Point(0, 0, camera_height) / ny
     upper_left_corner = camera_centre - i⃗ * nx / 2 + k⃗ * ny / 2
 
-	camera_origin = camera_centre - SA[0, focal_length, 0]
+	camera_origin = camera_centre - Point(0, focal_length, 0)
 
     img = zeros(Spectrum, ny, nx)
 
     samples_per_pixel = 10
+    maxDepth = 50
 
     for index in CartesianIndices(img)
         u = (index[2] - 1)
@@ -107,7 +124,7 @@ function render(nx, ny, camera_height = 2, camera_centre = SA[0, 1, 0], focal_le
 
             ray = Ray(camera_origin, normalize(random_pixel_position - camera_origin))
 
-            img[index] += rayColour(ray, HittableList)
+            img[index] += rayColour(ray, HittableList, maxDepth)
         end
     end
     img /= samples_per_pixel
@@ -123,12 +140,3 @@ end
 spectrum_img, rgb_img = render(imagesize(1920, 16/9)...)
 save("render.png", rgb_img)
 save("render.exr", rgb_img)
-
-# save("test.png", rgb_img) # It doesn't seem to be doing a gamma transformation to ppm file, so maybe not for this either.
-# save(File{format"PPMText"}("test.ppm"), rgb_img)
-# t2 = load("test.ppm")
-# reduce(vcat, [channestelview(test2)[:, index[1], index[2]] for index in CartesianIndices(test2)])' * 255 .|> Int
-# save("test.exr", rgb_img)
-# # @enter img = render(400, round(Int, 400 * 9/16))
-
-# test4 = load("test.png")
