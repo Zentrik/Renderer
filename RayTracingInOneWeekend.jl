@@ -15,24 +15,6 @@ Ray(origin, direction) = Ray(promote(origin, direction)...)
 end
 Sphere(centre, radius) = Sphere(promote(centre, radius)...)
 
-# function intersect(centre, radius, ray) # Relies on norm(ray.direction) == 1
-#     origin_to_centre = ray.origin - centre
-#     half_b = ray.direction ⋅ origin_to_centre
-#     c = origin_to_centre ⋅ origin_to_centre - radius^2
-#     quarter_discriminant = half_b^2 - c
-#     if quarter_discriminant < 0
-#         return - one(quarter_discriminant)
-#     else
-#         if -half_b - sqrt(quarter_discriminant) > 0
-#             return -half_b - sqrt(quarter_discriminant)
-#         elseif -half_b + sqrt(quarter_discriminant) ≥ 0
-#             return -half_b - sqrt(quarter_discriminant)
-#         else
-#             return - one(quarter_discriminant)
-#         end
-#     end
-# end
-
 function intersect(sphere::Sphere, ray) # Relies on norm(ray.direction) == 1
     origin_to_centre = ray.origin - sphere.centre
     half_b = ray.direction ⋅ origin_to_centre
@@ -57,7 +39,7 @@ end
 
 function scene(ray)
     sphere = Sphere(centre=SA[0, 0, 1.])
-    t = intersect(sphere, sphere, ray)
+    t = intersect(sphere, ray)
     if t > 0
         n = normalize(advance(ray, t) - sphere.centre)
         return ([n.x, n.y, -n.z] + ones(3)) / 2
