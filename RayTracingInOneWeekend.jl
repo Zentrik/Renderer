@@ -1,19 +1,18 @@
 using Parameters, StaticArrays, LinearAlgebra, Images
 
-const Point = SVector{3, Float64} 
+const T = Float64
+const Point = SVector{3, T} 
 
-@with_kw struct Ray{R <: Real} @deftype SVector{3, R} 
-    origin = @SVector zeros(Int, 3)
+@with_kw struct Ray @deftype Point
+    origin = @SVector zeros(3)
     direction = SA[0; 0; 1]
     @assert norm(direction) ≈ 1
 end
-Ray(origin, direction) = Ray(promote(origin, direction)...)
 
-@with_kw struct Sphere{R <: Real}
-    centre::SVector{3, R} = zeros(SVector{3, Int})
-    radius::R = 1
+@with_kw struct Sphere
+    centre::Point = @SVector zeros(3)
+    radius::T = 1
 end
-Sphere(centre, radius) = Sphere(promote(centre, radius)...)
 
 function intersect(sphere::Sphere, ray) # Relies on norm(ray.direction) == 1
     origin_to_centre = ray.origin - sphere.centre
@@ -21,14 +20,14 @@ function intersect(sphere::Sphere, ray) # Relies on norm(ray.direction) == 1
     c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
     quarter_discriminant = half_b^2 - c
     if quarter_discriminant < 0
-        return - one(quarter_discriminant)
+        return - one(T)
     else
         if -half_b - sqrt(quarter_discriminant) > 0
             return -half_b - sqrt(quarter_discriminant)
         elseif -half_b + sqrt(quarter_discriminant) ≥ 0
             return -half_b - sqrt(quarter_discriminant)
         else
-            return - one(quarter_discriminant)
+            return - one(T)
         end
     end
 end
@@ -38,7 +37,7 @@ function advance(ray, t)
 end
 
 function scene(ray)
-    sphere = Sphere(centre=SA[0, 0, 1.])
+    sphere = Sphere(centre=[0, 0, 1])
     t = intersect(sphere, ray)
     if t > 0
         n = normalize(advance(ray, t) - sphere.centre)
