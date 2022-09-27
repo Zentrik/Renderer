@@ -6,13 +6,13 @@ const Point = SVector{3, T}
 const Spectrum = SVector{3, T}
 
 @with_kw struct Ray @deftype Point
-    origin = @SVector zeros(3)
+    origin = zeros(Point)
     direction = Point(0, 1, 0)
     @assert norm(direction) ≈ 1
 end
 
 @with_kw struct Sphere{M}
-    centre::Point = zeros(Point, 3)
+    centre::Point = zeros(Point)
     radius::T = 0.5
     material::M = Diffuse()
 end
