@@ -1,8 +1,8 @@
-using Parameters, StaticArrays, LinearAlgebra, Images, ProgressMeter
+using Parameters, StaticArrays, LinearAlgebra, Images, ProgressMeter, ThreadsX, Random
 
-using TimerOutputs
-const to = TimerOutput()
-const tf = TimerOutput()
+# using TimerOutputs
+# const to = TimerOutput()
+# const tf = TimerOutput()
 
 const T = Float64
 const Point = SVector{3, T} 
@@ -12,7 +12,7 @@ const Spectrum = SVector{3, T}
 @with_kw struct Ray @deftype Point
     origin = zeros(Point)
     direction = Point(0, 1, 0)
-    @assert norm(direction) ≈ 1
+    # @assert norm(direction) ≈ 1
 end
 
 @with_kw struct Sphere{M}
@@ -81,101 +81,48 @@ end
 
 @inline norm2(x) = x ⋅ x
 
-function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
-    # @timeit tf "1" origin_to_centre .= ray.origin .- sphere.centre
-    # @timeit tf "2" half_b = ray.direction ⋅ origin_to_centre
-    # @timeit tf "3" c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
-    # @timeit tf "4" quarter_discriminant = half_b^2 - c
-    # @timeit tf "5" if quarter_discriminant < 0
-    #     @timeit tf "6" return zero(T)
-    # else
-    #     @timeit tf "8" sqrtd = sqrt(quarter_discriminant);
-    #     # Find the nearest root that lies in the acceptable range.
-    #     @timeit tf "11" root = -half_b - sqrtd
-    #     @timeit tf "12" if tmin < root < tmax
-    #         @timeit tf "13" return root
-    #     else
-    #         @timeit tf "14" root += sqrtd * 2
-    #         if tmin < root < tmax
-    #             @timeit tf "15" return root
-    #         else 
-    #             @timeit tf "16" return zero(T)
-    #         end
-    #     end
-    # end
-    return 0
-end
-
-function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
-    origin_to_centre = Point(undef)
+@inline @fastmath function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
     origin_to_centre = ray.origin - sphere.centre
-    # half_b = ray.direction ⋅ origin_to_centre
-    # c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
-    # quarter_discriminant = half_b^2 - c
-    # if quarter_discriminant < 0
-    #     return -one(T)
-    # else
-    #     sqrtd = sqrt(quarter_discriminant);
+    half_b = ray.direction ⋅ origin_to_centre
+    c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
+    quarter_discriminant = half_b^2 - c
+    if quarter_discriminant < 0
+        return -one(T)
+    else
+        sqrtd = sqrt(quarter_discriminant);
 
-    #     # Find the nearest root that lies in the acceptable range.
-    #     root = -half_b - sqrtd
-    #     if tmin < root < tmax
-    #         return root
-    #     elseif tmin < root + sqrtd * 2 < tmax
-    #         return root + sqrtd * 2
-    #     else 
-    #         return -one(T)
-    #     end
-    # end
+        # Find the nearest root that lies in the acceptable range.
+        root = -half_b - sqrtd
+        if tmin < root < tmax
+            return root
+        elseif tmin < root + sqrtd * 2 < tmax
+            return root + sqrtd * 2
+        else 
+            return -one(T)
+        end
+    end
     return origin_to_centre
 end
 
-function intersect(origin, direction, centre, radius, tmin, tmax) # Relies on norm(ray.direction) == 1
-    origin_to_centre = origin - centre
-    # half_b = direction ⋅ origin_to_centre
-    # c = origin_to_centre ⋅ origin_to_centre - radius^2
-    # quarter_discriminant = half_b^2 - c
-    # if quarter_discriminant < 0
-    #     return -one(T)
-    # else
-    #     sqrtd = sqrt(quarter_discriminant);
-
-    #     # Find the nearest root that lies in the acceptable range.
-    #     root = -half_b - sqrtd
-    #     if tmin < root < tmax
-    #         return root
-    #     elseif tmin < root + sqrtd * 2 < tmax
-    #         return root + sqrtd * 2
-    #     else 
-    #         return -one(T)
-    #     end
-    # end
-    return origin_to_centre
-end
-
-function test(player, opponent)
-    return player .+ opponent
-end
-
-function normal(sphere::Sphere, position)
+@inline @fastmath function normal(sphere::Sphere, position)
     return (position - sphere.centre) / sphere.radius
 end
 
-function advance(ray, t)
+@inline @fastmath function advance(ray, t)
     return ray.origin + t * ray.direction
 end
 
-function world(ray)
+@inline @fastmath function world(ray)
     interp = (ray.direction.z + 1) / 2
     return (1 - interp) * Spectrum([1, 1, 1]) + interp * Spectrum([0.5, 0.7, 1.0])
 end
 
-function sample_circle()
+@inline @fastmath function sample_circle()
     θ = 2π * rand(T)
     return SVector{2, T}(cos(θ), sin(θ))
 end
 
-function sample_hemisphere(n⃗)
+@inline @fastmath function sample_hemisphere(n⃗)
     ξ₁ = 2 * rand(T) - 1
     ξ₂ = rand(T)
     
@@ -188,7 +135,7 @@ end
 
 sample_nsphere(n) = normalize(randn(n))
 
-function reflect(ray, n⃗, fuzz=0)
+@inline @fastmath function reflect(ray, n⃗, fuzz=0)
     direction = ray.direction - 2(ray.direction ⋅ n⃗) * n⃗
 
     if fuzz ≉ 0 
@@ -198,14 +145,14 @@ function reflect(ray, n⃗, fuzz=0)
     return normalize(direction)
 end
 
-function refract(dir, n⃗, refraction_ratio)
+@inline @fastmath function refract(dir, n⃗, refraction_ratio)
     cosθ = min(-dir ⋅ n⃗, one(T))
     r_out_perp = refraction_ratio * (dir + cosθ*n⃗)
     r_out_parallel = -√(abs(one(T)-norm2(r_out_perp))) * n⃗
     normalize(r_out_perp + r_out_parallel)
 end
 
-function shick(cosθ, ior_ratio)
+@inline @fastmath function shick(cosθ, ior_ratio)
     r0 = ((1 - ior_ratio) / (1 + ior_ratio))^2
     return r0 = (1 - r0) * (1 - cosθ)^5
 end
@@ -232,7 +179,7 @@ function glass(ray, n⃗, ior)
         Rperp = ior_ratio * (ray.direction + cosθ * n⃗)
         Rpar = - sqrt(1 - norm2(Rperp)) * n⃗
 
-        @assert normalize(Rperp + Rpar) ≈ refract(ray.direction, n⃗, ior_ratio)
+        # @assert normalize(Rperp + Rpar) ≈ refract(ray.direction, n⃗, ior_ratio)
         return normalize(Rperp + Rpar)
     end
 end
@@ -255,10 +202,10 @@ function lambertian(n⃗)
     end
 end
 
-function findSceneIntersection(ray, HittableList, tmin, tmax)
+@inline function findSceneIntersection(ray, HittableList, tmin, tmax)
     hitIndex = 0
-    for (i, hittable) in enumerate(HittableList)
-        t = intersect(ray, hittable, tmin, tmax) 
+    for i in 1:length(HittableList)
+        t = intersect(ray, HittableList[i], tmin, tmax) 
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
             hitIndex = i
@@ -268,36 +215,47 @@ function findSceneIntersection(ray, HittableList, tmin, tmax)
     return (tmax, hitIndex)
 end
 
-function rayColour(ray, HittableList, depth, tmin=1e-4, tmax=Inf)
-    @timeit to "depth == 0" if depth == 0
+@inline function findSceneIntersectionParallel(ray, HittableList, tmin, tmax)
+    hitIndex = 0
+    t = Threads.map(hittable -> intersect(ray, hittable, tmin, tmax), HittableList)
+    for i in 1:length(HittableList)
+        if 0 < t[i] < tmax # we know t ≤ tmax as t is the result of intersect
+            tmax = t[i]
+            hitIndex = i
+        end
+    end
+
+    return (tmax, hitIndex)
+end
+
+function rayColour(ray, HittableList, depth, tmin=1e-4, tmax=Inf)::Spectrum
+    if depth == 0
         return zeros(Spectrum)
     end
 
-    @timeit to "findSceneIntersection" tmax, hitIndex = findSceneIntersection(ray, HittableList, tmin, tmax)
+    tmax, hitIndex = findSceneIntersection(ray, HittableList, tmin, tmax)
 
-    if true #hitIndex == 0 # nothing hit
+    if hitIndex == 0 # nothing hit
         return world(ray)
     else
-        @timeit to "hit" hit = HittableList[hitIndex]
-        @timeit to "position" position = advance(ray, tmax)
-        @timeit to "normal" n⃗ = normal(hit, position)
+        hit = HittableList[hitIndex]
+        position = advance(ray, tmax)
+        n⃗ = normal(hit, position)
 
         if typeof(hit.material) == Diffuse
-            @timeit to "diffuse" direction = sample_hemisphere(n⃗)
+            direction = sample_hemisphere(n⃗)
             # direction = hackyway(n⃗)
             # direction = lambertian(n⃗)
         elseif typeof(hit.material) == Metal
-            @timeit to "metal" direction = reflect(ray, n⃗, hit.material.fuzz)
+            direction = reflect(ray, n⃗, hit.material.fuzz)
         elseif typeof(hit.material) == Glass
-            @timeit to "glass" direction = glass(ray, n⃗, hit.material.ior)
+            direction = glass(ray, n⃗, hit.material.ior)
         end
 
-        @timeit to "ray" ray = Ray(position, direction)
-        @timeit to "rayColourRecurrence" return rayColour(ray, HittableList, depth - 1) .* hit.material.attenuation
+        ray = Ray(position, direction)
+        return rayColour(ray, HittableList, depth - 1) .* hit.material.attenuation
     end
 end
-
-using StructArrays
 
 function scene_random_spheres()
 	HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
@@ -331,6 +289,17 @@ function scene_random_spheres()
     return HittableList #SVector{length(HittableList), Sphere}(HittableList)
 end
 
+function rendexPixel(HittableList, maxDepth, pixel_position, camera)
+    random_pixel_position = pixel_position + rand(T) * camera.right + rand(T) * camera.down # Is this correct when multithreaded?
+
+    defocus_random = camera.lens_radius * sample_circle()
+    defocus_offset = defocus_random[1] * normalize(camera.right) + defocus_random[2] * normalize(camera.down)
+
+    ray = Ray(camera.pinhole_location + defocus_offset, normalize(random_pixel_position - camera.pinhole_location - defocus_offset))
+
+    return rayColour(ray, HittableList, maxDepth)
+end
+
 function render(nx, ny, camera=Camera(), print=true)
     # sphere1 = Sphere([0, 1, -100.5], 100, Diffuse([0.8, 0.8, 0]))
     # sphere2 = Sphere(centre=[0, 1, 0], material=Diffuse([0.1, 0.2, 0.5]))
@@ -344,25 +313,18 @@ function render(nx, ny, camera=Camera(), print=true)
 
     img = zeros(Spectrum, ny, nx)
 
-    samples_per_pixel = 1
-    maxDepth = 5
+    samples_per_pixel = 2
+    maxDepth = 3
 
-    @showprogress for index in CartesianIndices(img)
-        u = (index[2] - 1)
-        v = (index[1] - 1)
-        pixel_position = camera.upper_left_corner + u * camera.right + v * camera.down
+    img = ThreadsX.map(index -> sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel), CartesianIndices(img))
 
-        for sample in 1:samples_per_pixel
-            random_pixel_position = pixel_position + rand(T) * camera.right + rand(T) * camera.down
+    # @showprogress for index in CartesianIndices(img)
+    #     u = (index[2] - 1)
+    #     v = (index[1] - 1)
+    #     pixel_position = camera.upper_left_corner + u * camera.right + v * camera.down
 
-            defocus_random = camera.lens_radius * sample_circle()
-            defocus_offset = defocus_random[1] * normalize(camera.right) + defocus_random[2] * normalize(camera.down)
-
-            ray = Ray(camera.pinhole_location + defocus_offset, normalize(random_pixel_position - camera.pinhole_location - defocus_offset))
-
-            @timeit to "rayColour" img[index] += rayColour(ray, HittableList, maxDepth)
-        end
-    end
+    #     img[index] = sum(rendexPixel(HittableList, maxDepth, pixel_position, camera) for sample in 1:samples_per_pixel)
+    # end
     img /= samples_per_pixel
     
     if print
@@ -374,8 +336,13 @@ end
     
 render(nx=400) = render(imagesize(nx, 16/9)..., Camera(imagesize(nx, 16/9)...))
 
+# @code_warntype rendexPixel(scene_random_spheres(), 10, Point(0, 0, 1), Camera());
+# @code_warntype rayColour(Ray(), scene_random_spheres(), 10);
+# @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
+# @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
+
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
-spectrum_img, rgb_img = render(imagesize(400, 16/9)..., Camera(imagesize(400, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10))
+spectrum_img, rgb_img = render(imagesize(400, 16/9)..., Camera(imagesize(400, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10));
 # save("render.png", rgb_img)
 # save("render.exr", rgb_img)
 
