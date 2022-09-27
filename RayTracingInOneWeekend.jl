@@ -15,25 +15,32 @@ const Spectrum = SVector{3, T}
     # @assert norm(direction) ≈ 1
 end
 
-@with_kw struct Sphere{M}
+abstract type Material end
+
+@with_kw struct Sphere
     centre::Point = zeros(Point)
     radius::T = 0.5
-    material::M = Diffuse()
+    material::Material = Diffuse() # saves 20gb, and speeds up significantly
 end
 
-@with_kw struct Diffuse
+@with_kw struct Diffuse <: Material
     attenuation::Spectrum = ones(Spectrum)
 end
 
-@with_kw struct Metal
+@with_kw struct Metal <: Material
     attenuation::Spectrum = ones(Spectrum)
     fuzz::T = 0
 end
 
-@with_kw struct Glass
+@with_kw struct Glass <: Material
     attenuation::Spectrum = ones(Spectrum)
     ior::T = 1.5
 end
+
+# useful if we add more objects other than spheres
+# const HittableDictType = Dict{Type{Sphere}, Vector{Sphere}}
+# HittableDict(v::Sphere) = HittableDictType(Sphere => [v])
+# HittableDict(v::Vector{Sphere}) = HittableDictType(Sphere => v)
 
 function imagesize(height, aspectRatio)
     return (height, round(Int, height / aspectRatio))
@@ -81,7 +88,7 @@ end
 
 @inline norm2(x) = x ⋅ x
 
-@inline @fastmath function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
+function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
     origin_to_centre = ray.origin - sphere.centre
     half_b = ray.direction ⋅ origin_to_centre
     c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
@@ -202,10 +209,10 @@ function lambertian(n⃗)
     end
 end
 
-@inline function findSceneIntersection(ray, HittableList, tmin, tmax)
+function findSceneIntersection(ray, hittable_list::Vector{Sphere}, tmin, tmax)
     hitIndex = 0
-    for i in 1:length(HittableList)
-        t = intersect(ray, HittableList[i], tmin, tmax) 
+    for i in eachindex(hittable_list)
+        t = intersect(ray, hittable_list[i], tmin, tmax)
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
             hitIndex = i
@@ -215,31 +222,93 @@ end
     return (tmax, hitIndex)
 end
 
-@inline function findSceneIntersectionParallel(ray, HittableList, tmin, tmax)
-    hitIndex = 0
-    t = Threads.map(hittable -> intersect(ray, hittable, tmin, tmax), HittableList)
-    for i in 1:length(HittableList)
-        if 0 < t[i] < tmax # we know t ≤ tmax as t is the result of intersect
-            tmax = t[i]
-            hitIndex = i
-        end
-    end
+# useful if we use more objects than spheres
+# function findSceneIntersection(ray, hittable_list::HittableDictType, tmin, tmax)
+#     hitIndex = 0
+#     key = collect(keys(hittable_list))[1]
+#     for (type, hittable) in hittable_list
+#         (t, index) = findSceneIntersection(ray, hittable, tmin, tmax)
+#         if t > 0 # we know t ≤ tmax as t is the result of intersect
+#             tmax = t
+#             hitIndex = index
+#             key = type
+#         end
+#     end
 
-    return (tmax, hitIndex)
-end
+#     return (tmax, key, hitIndex)
+# end
 
-function rayColour(ray, HittableList, depth, tmin=1e-4, tmax=Inf)::Spectrum
+# function findSceneIntersection(ray, HittableList, tmin, tmax)
+#     hitIndex = 0
+#     for i in eachindex(HittableList)
+#         origin_to_centre = ray.origin - HittableList[i].centre  # The source of most of the allocations
+#         half_b = ray.direction ⋅ origin_to_centre
+#         c = origin_to_centre ⋅ origin_to_centre - HittableList[i].radius^2
+#         quarter_discriminant = half_b^2 - c
+#         if quarter_discriminant < 0
+#             continue
+#         else
+#             sqrtd = sqrt(quarter_discriminant);
+    
+#             # Find the nearest root that lies in the acceptable range.
+#             root = -half_b - sqrtd
+#             if tmin < root < tmax
+#                 tmax = root
+#                 hitIndex = i
+#             elseif tmin < root + sqrtd * 2 < tmax
+#                 tmax = root + sqrtd * 2
+#                 hitIndex = i
+#             else 
+#                 continue
+#             end
+#         end
+#     end
+
+#     return (tmax, hitIndex)
+# end
+
+
+# function rayColour(ray, hittable_list::HittableDictType, depth, tmin=1e-4, tmax=Inf)::Spectrum
+#     if depth == 0
+#         return zeros(Spectrum)
+#     end
+
+#     t, key, hitIndex = findSceneIntersection(ray, hittable_list, tmin, tmax)
+
+#     if t == Inf # nothing hit
+#         return world(ray)
+#     else
+#         hit = get(hittable_list, key, nothing)[hitIndex]
+#         position = advance(ray, t)
+#         n⃗ = normal(hit, position)
+
+#         if typeof(hit.material) == Diffuse
+#             direction = sample_hemisphere(n⃗)
+#             # direction = hackyway(n⃗)
+#             # direction = lambertian(n⃗)
+#         elseif typeof(hit.material) == Metal
+#             direction = reflect(ray, n⃗, hit.material.fuzz)
+#         elseif typeof(hit.material) == Glass
+#             direction = glass(ray, n⃗, hit.material.ior)
+#         end
+
+#         ray = Ray(position, direction)
+#         return rayColour(ray, hittable_list, depth - 1) .* hit.material.attenuation
+#     end
+# end
+
+function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
     if depth == 0
         return zeros(Spectrum)
     end
 
-    tmax, hitIndex = findSceneIntersection(ray, HittableList, tmin, tmax)
+    t, hitIndex = findSceneIntersection(ray, hittable_list, tmin, tmax)
 
-    if hitIndex == 0 # nothing hit
+    if t == Inf # nothing hit
         return world(ray)
     else
-        hit = HittableList[hitIndex]
-        position = advance(ray, tmax)
+        hit = hittable_list[hitIndex]
+        position = advance(ray, t)
         n⃗ = normal(hit, position)
 
         if typeof(hit.material) == Diffuse
@@ -253,9 +322,10 @@ function rayColour(ray, HittableList, depth, tmin=1e-4, tmax=Inf)::Spectrum
         end
 
         ray = Ray(position, direction)
-        return rayColour(ray, HittableList, depth - 1) .* hit.material.attenuation
+        return rayColour(ray, hittable_list, depth - 1) .* hit.material.attenuation
     end
 end
+
 
 function scene_random_spheres()
 	HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
@@ -286,7 +356,7 @@ function scene_random_spheres()
 	push!(HittableList, Sphere([0,0,1], 1, Glass()))
 	push!(HittableList, Sphere([-4,0,1], 1, Diffuse([0.4,0.2,0.1])))
 	push!(HittableList, Sphere([4,0,1], 1, Metal(attenuation=[0.7,0.6,0.5])))
-    return HittableList #SVector{length(HittableList), Sphere}(HittableList)
+    return HittableList #HittableDict(HittableList) #SVector{length(HittableList), Sphere}(HittableList)
 end
 
 function rendexPixel(HittableList, maxDepth, pixel_position, camera)
@@ -313,8 +383,8 @@ function render(nx, ny, camera=Camera(), print=true)
 
     img = zeros(Spectrum, ny, nx)
 
-    samples_per_pixel = 2
-    maxDepth = 3
+    samples_per_pixel = 50
+    maxDepth = 16
 
     img = ThreadsX.map(index -> sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel), CartesianIndices(img))
 
@@ -339,13 +409,15 @@ render(nx=400) = render(imagesize(nx, 16/9)..., Camera(imagesize(nx, 16/9)...))
 # @code_warntype rendexPixel(scene_random_spheres(), 10, Point(0, 0, 1), Camera());
 # @code_warntype rayColour(Ray(), scene_random_spheres(), 10);
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
+# @code_warntype findSceneIntersection(Ray(), collect(values(scene_random_spheres()))[1], 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
 
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
-spectrum_img, rgb_img = render(imagesize(400, 16/9)..., Camera(imagesize(400, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10));
+using BenchmarkTools
+@btime spectrum_img, rgb_img = render(imagesize(400, 16/9)..., Camera(imagesize(400, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10));
 # save("render.png", rgb_img)
 # save("render.exr", rgb_img)
 
 # using ImageContrastAdjustment
 # adjust_histogram(rgb_img, GammaCorrection(gamma=1/2))
-# map(x -> RGB(x.^(1/2)...), spectrum_img)
+# map(x -> RGB(x.^(1/2)...), spectrum_im
