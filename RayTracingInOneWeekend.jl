@@ -1,9 +1,5 @@
 using Parameters, StaticArrays, LinearAlgebra, Images, ProgressMeter, ThreadsX, Random
 
-# using TimerOutputs
-# const to = TimerOutput()
-# const tf = TimerOutput()
-
 const T = Float64
 const Point = SVector{3, T} 
 
@@ -37,14 +33,8 @@ end
     ior::T = 1.5
 end
 
-# useful if we add more objects other than spheres
-# const HittableDictType = Dict{Type{Sphere}, Vector{Sphere}}
-# HittableDict(v::Sphere) = HittableDictType(Sphere => [v])
-# HittableDict(v::Vector{Sphere}) = HittableDictType(Sphere => v)
+imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
 
-function imagesize(height, aspectRatio)
-    return (height, round(Int, height / aspectRatio))
-end
 
 @with_kw struct Camera @deftype Point
     right = Point(2 * 16/9, 0, 0) / 400
@@ -111,13 +101,9 @@ function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.directi
     return origin_to_centre
 end
 
-@inline @fastmath function normal(sphere::Sphere, position)
-    return (position - sphere.centre) / sphere.radius
-end
+@inline @fastmath normal(sphere::Sphere, position) = (position - sphere.centre) / sphere.radius
 
-@inline @fastmath function advance(ray, t)
-    return ray.origin + t * ray.direction
-end
+@inline @fastmath advance(ray, t) = ray.origin + t * ray.direction
 
 @inline @fastmath function world(ray)
     interp = (ray.direction.z + 1) / 2
@@ -139,8 +125,6 @@ end
     end
     return sample
 end
-
-sample_nsphere(n) = normalize(randn(n))
 
 @inline @fastmath function reflect(ray, n⃗, fuzz=0)
     direction = ray.direction - 2(ray.direction ⋅ n⃗) * n⃗
@@ -191,24 +175,6 @@ function glass(ray, n⃗, ior)
     end
 end
 
-function hackyway(n⃗)
-    while true
-        sample = rand(Point) * 2 .- 1
-        if norm2(sample) ≤ 1
-            return normalize(n⃗ + sample)
-        end
-    end
-end
-
-function lambertian(n⃗)
-    while true
-        sample = rand(Point) * 2 .- 1
-        if norm2(sample) ≤ 1
-            return normalize(n⃗ + normalize(sample))
-        end
-    end
-end
-
 function findSceneIntersection(ray, hittable_list::Vector{Sphere}, tmin, tmax)
     hitIndex = 0
     for i in eachindex(hittable_list)
@@ -221,81 +187,6 @@ function findSceneIntersection(ray, hittable_list::Vector{Sphere}, tmin, tmax)
 
     return (tmax, hitIndex)
 end
-
-# useful if we use more objects than spheres
-# function findSceneIntersection(ray, hittable_list::HittableDictType, tmin, tmax)
-#     hitIndex = 0
-#     key = collect(keys(hittable_list))[1]
-#     for (type, hittable) in hittable_list
-#         (t, index) = findSceneIntersection(ray, hittable, tmin, tmax)
-#         if t > 0 # we know t ≤ tmax as t is the result of intersect
-#             tmax = t
-#             hitIndex = index
-#             key = type
-#         end
-#     end
-
-#     return (tmax, key, hitIndex)
-# end
-
-# function findSceneIntersection(ray, HittableList, tmin, tmax)
-#     hitIndex = 0
-#     for i in eachindex(HittableList)
-#         origin_to_centre = ray.origin - HittableList[i].centre  # The source of most of the allocations
-#         half_b = ray.direction ⋅ origin_to_centre
-#         c = origin_to_centre ⋅ origin_to_centre - HittableList[i].radius^2
-#         quarter_discriminant = half_b^2 - c
-#         if quarter_discriminant < 0
-#             continue
-#         else
-#             sqrtd = sqrt(quarter_discriminant);
-    
-#             # Find the nearest root that lies in the acceptable range.
-#             root = -half_b - sqrtd
-#             if tmin < root < tmax
-#                 tmax = root
-#                 hitIndex = i
-#             elseif tmin < root + sqrtd * 2 < tmax
-#                 tmax = root + sqrtd * 2
-#                 hitIndex = i
-#             else 
-#                 continue
-#             end
-#         end
-#     end
-
-#     return (tmax, hitIndex)
-# end
-
-
-# function rayColour(ray, hittable_list::HittableDictType, depth, tmin=1e-4, tmax=Inf)::Spectrum
-#     if depth == 0
-#         return zeros(Spectrum)
-#     end
-
-#     t, key, hitIndex = findSceneIntersection(ray, hittable_list, tmin, tmax)
-
-#     if t == Inf # nothing hit
-#         return world(ray)
-#     else
-#         hit = get(hittable_list, key, nothing)[hitIndex]
-#         position = advance(ray, t)
-#         n⃗ = normal(hit, position)
-
-#         if typeof(hit.material) == Diffuse
-#             direction = sample_hemisphere(n⃗)
-#             # direction = hackyway(n⃗)
-#             # direction = lambertian(n⃗)
-#         elseif typeof(hit.material) == Metal
-#             direction = reflect(ray, n⃗, hit.material.fuzz)
-#         elseif typeof(hit.material) == Glass
-#             direction = glass(ray, n⃗, hit.material.ior)
-#         end
-
-#         ray = Ray(position, direction)
-#         return rayColour(ray, hittable_list, depth - 1) .* hit.material.attenuation
-#     end
-# end
 
 function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
     if depth == 0
@@ -313,8 +204,6 @@ function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
 
         if typeof(hit.material) == Diffuse
             direction = sample_hemisphere(n⃗)
-            # direction = hackyway(n⃗)
-            # direction = lambertian(n⃗)
         elseif typeof(hit.material) == Metal
             direction = reflect(ray, n⃗, hit.material.fuzz)
         elseif typeof(hit.material) == Glass
@@ -325,7 +214,6 @@ function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
         return rayColour(ray, hittable_list, depth - 1) .* hit.material.attenuation
     end
 end
-
 
 function scene_random_spheres()
 	HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
@@ -388,13 +276,6 @@ function render(nx, ny, camera=Camera(), print=true)
 
     img = ThreadsX.map(index -> sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel), CartesianIndices(img))
 
-    # @showprogress for index in CartesianIndices(img)
-    #     u = (index[2] - 1)
-    #     v = (index[1] - 1)
-    #     pixel_position = camera.upper_left_corner + u * camera.right + v * camera.down
-
-    #     img[index] = sum(rendexPixel(HittableList, maxDepth, pixel_position, camera) for sample in 1:samples_per_pixel)
-    # end
     img /= samples_per_pixel
     
     if print
@@ -414,7 +295,7 @@ render(nx=400) = render(imagesize(nx, 16/9)..., Camera(imagesize(nx, 16/9)...))
 
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
 using BenchmarkTools
-@btime spectrum_img, rgb_img = render(imagesize(400, 16/9)..., Camera(imagesize(400, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10));
+@btime spectrum_img, rgb_img = render(imagesize(400, 16/9)..., Camera(imagesize(400, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)); # 11.884 s (82113219 allocations: 3.65 GiB)
 # save("render.png", rgb_img)
 # save("render.exr", rgb_img)
 
