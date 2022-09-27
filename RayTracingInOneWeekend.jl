@@ -1,5 +1,9 @@
 using Parameters, StaticArrays, LinearAlgebra, Images, ProgressMeter
 
+using TimerOutputs
+const to = TimerOutput()
+const tf = TimerOutput()
+
 const T = Float64
 const Point = SVector{3, T} 
 
@@ -75,28 +79,82 @@ end
     end
 end
 
-norm2(x) = x ⋅ x
+@inline norm2(x) = x ⋅ x
 
 function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
-    origin_to_centre = ray.origin - sphere.centre
-    half_b = ray.direction ⋅ origin_to_centre
-    c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
-    quarter_discriminant = half_b^2 - c
-    if quarter_discriminant < 0
-        return -one(T)
-    else
-        sqrtd = sqrt(quarter_discriminant);
+    # @timeit tf "1" origin_to_centre .= ray.origin .- sphere.centre
+    # @timeit tf "2" half_b = ray.direction ⋅ origin_to_centre
+    # @timeit tf "3" c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
+    # @timeit tf "4" quarter_discriminant = half_b^2 - c
+    # @timeit tf "5" if quarter_discriminant < 0
+    #     @timeit tf "6" return zero(T)
+    # else
+    #     @timeit tf "8" sqrtd = sqrt(quarter_discriminant);
+    #     # Find the nearest root that lies in the acceptable range.
+    #     @timeit tf "11" root = -half_b - sqrtd
+    #     @timeit tf "12" if tmin < root < tmax
+    #         @timeit tf "13" return root
+    #     else
+    #         @timeit tf "14" root += sqrtd * 2
+    #         if tmin < root < tmax
+    #             @timeit tf "15" return root
+    #         else 
+    #             @timeit tf "16" return zero(T)
+    #         end
+    #     end
+    # end
+    return 0
+end
 
-        # Find the nearest root that lies in the acceptable range.
-        root = -half_b - sqrtd
-        if tmin < root < tmax
-            return root
-        elseif tmin < root + sqrtd * 2 < tmax
-            return root + sqrtd * 2
-        else 
-            return -one(T)
-        end
-    end
+function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
+    origin_to_centre = Point(undef)
+    origin_to_centre = ray.origin - sphere.centre
+    # half_b = ray.direction ⋅ origin_to_centre
+    # c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
+    # quarter_discriminant = half_b^2 - c
+    # if quarter_discriminant < 0
+    #     return -one(T)
+    # else
+    #     sqrtd = sqrt(quarter_discriminant);
+
+    #     # Find the nearest root that lies in the acceptable range.
+    #     root = -half_b - sqrtd
+    #     if tmin < root < tmax
+    #         return root
+    #     elseif tmin < root + sqrtd * 2 < tmax
+    #         return root + sqrtd * 2
+    #     else 
+    #         return -one(T)
+    #     end
+    # end
+    return origin_to_centre
+end
+
+function intersect(origin, direction, centre, radius, tmin, tmax) # Relies on norm(ray.direction) == 1
+    origin_to_centre = origin - centre
+    # half_b = direction ⋅ origin_to_centre
+    # c = origin_to_centre ⋅ origin_to_centre - radius^2
+    # quarter_discriminant = half_b^2 - c
+    # if quarter_discriminant < 0
+    #     return -one(T)
+    # else
+    #     sqrtd = sqrt(quarter_discriminant);
+
+    #     # Find the nearest root that lies in the acceptable range.
+    #     root = -half_b - sqrtd
+    #     if tmin < root < tmax
+    #         return root
+    #     elseif tmin < root + sqrtd * 2 < tmax
+    #         return root + sqrtd * 2
+    #     else 
+    #         return -one(T)
+    #     end
+    # end
+    return origin_to_centre
+end
+
+function test(player, opponent)
+    return player .+ opponent
 end
 
 function normal(sphere::Sphere, position)
@@ -197,11 +255,7 @@ function lambertian(n⃗)
     end
 end
 
-function rayColour(ray, HittableList, depth, tmin=1e-4, tmax=Inf)
-    if depth ≤ 0
-        return zeros(Spectrum)
-    end
-
+function findSceneIntersection(ray, HittableList, tmin, tmax)
     hitIndex = 0
     for (i, hittable) in enumerate(HittableList)
         t = intersect(ray, hittable, tmin, tmax) 
@@ -211,30 +265,42 @@ function rayColour(ray, HittableList, depth, tmin=1e-4, tmax=Inf)
         end
     end
 
-    if hitIndex == 0 # nothing hit
+    return (tmax, hitIndex)
+end
+
+function rayColour(ray, HittableList, depth, tmin=1e-4, tmax=Inf)
+    @timeit to "depth == 0" if depth == 0
+        return zeros(Spectrum)
+    end
+
+    @timeit to "findSceneIntersection" tmax, hitIndex = findSceneIntersection(ray, HittableList, tmin, tmax)
+
+    if true #hitIndex == 0 # nothing hit
         return world(ray)
     else
-        hit = HittableList[hitIndex]
-        position = advance(ray, tmax)
-        n⃗ = normal(hit, position)
+        @timeit to "hit" hit = HittableList[hitIndex]
+        @timeit to "position" position = advance(ray, tmax)
+        @timeit to "normal" n⃗ = normal(hit, position)
 
         if typeof(hit.material) == Diffuse
-            direction = sample_hemisphere(n⃗)
+            @timeit to "diffuse" direction = sample_hemisphere(n⃗)
             # direction = hackyway(n⃗)
             # direction = lambertian(n⃗)
         elseif typeof(hit.material) == Metal
-            direction = reflect(ray, n⃗, hit.material.fuzz)
+            @timeit to "metal" direction = reflect(ray, n⃗, hit.material.fuzz)
         elseif typeof(hit.material) == Glass
-            direction = glass(ray, n⃗, hit.material.ior)
+            @timeit to "glass" direction = glass(ray, n⃗, hit.material.ior)
         end
 
-        ray = Ray(position, direction)
-        return rayColour(ray, HittableList, depth - 1) .* hit.material.attenuation
+        @timeit to "ray" ray = Ray(position, direction)
+        @timeit to "rayColourRecurrence" return rayColour(ray, HittableList, depth - 1) .* hit.material.attenuation
     end
 end
 
+using StructArrays
+
 function scene_random_spheres()
-	HittableList = Sphere[]
+	HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
 	push!(HittableList, Sphere([0, 0, -1000], 1000, Diffuse([.5, .5, .5])))
 
 	for a in -11:10, b in -11:10
@@ -262,24 +328,24 @@ function scene_random_spheres()
 	push!(HittableList, Sphere([0,0,1], 1, Glass()))
 	push!(HittableList, Sphere([-4,0,1], 1, Diffuse([0.4,0.2,0.1])))
 	push!(HittableList, Sphere([4,0,1], 1, Metal(attenuation=[0.7,0.6,0.5])))
-	return HittableList
+    return HittableList #SVector{length(HittableList), Sphere}(HittableList)
 end
 
-function render(nx, ny, camera=Camera())
+function render(nx, ny, camera=Camera(), print=true)
     # sphere1 = Sphere([0, 1, -100.5], 100, Diffuse([0.8, 0.8, 0]))
     # sphere2 = Sphere(centre=[0, 1, 0], material=Diffuse([0.1, 0.2, 0.5]))
     # sphere3 = Sphere(centre=[-1, 1, 0], material=Glass(ior = 1.5))
     # sphere4 = Sphere(centre=[1, 1, 0], material=Metal([0.8, 0.6, 0.2], 0))
     # sphere5 = Sphere([-1, 1, 0], -.45, Glass(ior = 1.5))
 
-    # HittableList = [sphere1, sphere2, sphere3, sphere4, sphere5]
+    # HittableList = SA[sphere1, sphere2, sphere3, sphere4, sphere5]
 
     HittableList = scene_random_spheres()
 
     img = zeros(Spectrum, ny, nx)
 
-    samples_per_pixel = 10
-    maxDepth = 50
+    samples_per_pixel = 1
+    maxDepth = 5
 
     @showprogress for index in CartesianIndices(img)
         u = (index[2] - 1)
@@ -294,12 +360,15 @@ function render(nx, ny, camera=Camera())
 
             ray = Ray(camera.pinhole_location + defocus_offset, normalize(random_pixel_position - camera.pinhole_location - defocus_offset))
 
-            img[index] += rayColour(ray, HittableList, maxDepth)
+            @timeit to "rayColour" img[index] += rayColour(ray, HittableList, maxDepth)
         end
     end
     img /= samples_per_pixel
+    
+    if print
+        map(x -> RGB(x...), img) |> display
+    end
 
-    map(x -> RGB(x...), img) |> display
     return img, map(x -> RGB(x...), img)
 end
     
@@ -307,9 +376,9 @@ render(nx=400) = render(imagesize(nx, 16/9)..., Camera(imagesize(nx, 16/9)...))
 
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
 spectrum_img, rgb_img = render(imagesize(400, 16/9)..., Camera(imagesize(400, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10))
-save("render.png", rgb_img)
-save("render.exr", rgb_img)
+# save("render.png", rgb_img)
+# save("render.exr", rgb_img)
 
 # using ImageContrastAdjustment
 # adjust_histogram(rgb_img, GammaCorrection(gamma=1/2))
-map(x -> RGB(x.^(1/2)...), spectrum_img)
+# map(x -> RGB(x.^(1/2)...), spectrum_img)
