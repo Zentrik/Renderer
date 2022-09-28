@@ -1,9 +1,10 @@
-using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, Random, FunctionWrappers
+using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers
 import FunctionWrappers: FunctionWrapper
 
-const Point = SVector{3, Float64} # We use define Float64 so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere.
-# we dont do const T = Float64 as that makes Point(bla) slow in sample_hemisphere and world() slow.
-const Spectrum = SVector{3, Float64}
+const T = Float64
+const Point = SVector{3, T} # We use define Float64 so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
+# we dont do const T = Float64 as that makes Point(bla) slow in sample_hemisphere and world() slow. # seems fine now? i think splitting sample_hemisphere into sample_sphere has helpled.
+const Spectrum = SVector{3, T}
 
 @with_kw struct Ray @deftype Point
     origin = zeros(Point)
@@ -14,7 +15,7 @@ end
 
 @with_kw struct Sphere
     centre::Point = zeros(Point)
-    radius::Float64 = 1//2
+    radius::T = 1//2
     colour::Spectrum = ones(Spectrum)
     scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = (ray, n) -> sample_hemisphere(n)
 end
@@ -34,7 +35,7 @@ imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
         aspect_ratio = nx/ny
 
         camera_height *= focus_distance
-        right= Point(camera_height * aspect_ratio, 0, 0) / nx
+        right = Point(camera_height * aspect_ratio, 0, 0) / nx
         down = - Point(0, 0, camera_height) / ny
         upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
         pinhole_location = camera_centre - Point(0, focus_distance, 0)
@@ -60,6 +61,7 @@ imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
         return new{T}(right, down, upper_left_corner, pinhole_location, lens_radius)
     end
 end
+pixelWorldPosition(camera, index) = camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down
 
 norm2(x) = x ⋅ x
 
@@ -105,7 +107,7 @@ function sample_sphere()
     return Point(cos(2π * ξ₂) * sqrt(1 - ξ₁^2), sin(2π * ξ₂) * sqrt(1 - ξ₁^2), ξ₁) # allocates memory some times? (seems fine now?)
 end
 
-function sample_hemisphere(n⃗::SVector{3, Float64})::Point
+function sample_hemisphere(n⃗)
     sample = sample_sphere()
     if sample ⋅ n⃗ < 0
        return -sample
@@ -157,7 +159,7 @@ end
 
 glass(ior=3//2) = (ray, n⃗) -> glass(ray, n⃗, ior)
 diffuse(ray, n) = sample_hemisphere(n)
-metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz)
+metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
 
 function findSceneIntersection(ray, hittable_list::Vector{Sphere}, tmin, tmax)
     hitIndex = 0
@@ -223,7 +225,7 @@ function scene_random_spheres()
     return HittableList #HittableDict(HittableList) #SVector{length(HittableList), Sphere}(HittableList)
 end
 
-function rendexPixel(HittableList, maxDepth, pixel_position, camera)
+function renderRay(HittableList, maxDepth, pixel_position, camera)
     random_pixel_position = pixel_position + rand() * camera.right + rand() * camera.down # Is this correct when multithreaded?
 
     defocus_random = camera.lens_radius * sample_circle()
@@ -241,13 +243,13 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
     #     end
     # end
 
-    ThreadsX.map!(index -> sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel), img, CartesianIndices(img))
+    ThreadsX.map!(index -> sum(sample -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
 
     # Threads.@threads for index in CartesianIndices(img) # Seems a bit slower thatn ThreadsX ∼5%
     #     img[index] = sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel)
     # end
 
-    img ./= samples_per_pixel
+    # img ./= samples_per_pixel
 
     return nothing
 end
@@ -259,26 +261,11 @@ end
 
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
 
-using Profile, PProf
-function profile()
-    scene = scene_random_spheres()
-    img = zeros(Spectrum, imagesize(10, 16//9)...)
-    camera = Camera(imagesize(10, 16//9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    spectrum_img, rgb_img = render!(img, scene, camera)
-
-    Profile.Allocs.clear(); 
-
-    @time Profile.Allocs.@profile sample_rate=1 spectrum_img, rgb_img = render!(img, scene, camera)
-
-    PProf.Allocs.pprof(from_c=false, webport=8080)
-end
-
-
-using BenchmarkTools
 function run(print=false)
     scene = scene_random_spheres()
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
-    @time render!(spectrum_img, scene, Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10), samples_per_pixel=1000)
+    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=100)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -286,7 +273,33 @@ function run(print=false)
     return rgb_img
 end
 
-# @btime spectrum_img, rgb_img = render(imagesize(50, 16/9)..., Camera(imagesize(50, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10), false) # 6.990 s (8986595 allocations: 716.80 MiB)
+using Profile, PProf
+function profile()
+    scene = scene_random_spheres()
+    spectrum_img = zeros(Spectrum, reverse(imagesize(100, 16//9))...)
+    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    render!(spectrum_img, scene, camera)
+
+    Profile.Allocs.clear(); 
+
+    @time Profile.Allocs.@profile sample_rate=1 render!(spectrum_img, scene, camera)
+
+    PProf.Allocs.pprof(from_c=false, webport=8080)
+end
+
+using BenchmarkTools
+function benchmark(print=false)
+    scene = scene_random_spheres()
+    spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
+    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    @btime render!($spectrum_img, $scene, $camera, samples_per_pixel=100)
+    rgb_img = map(x -> RGB(x...), spectrum_img)
+    if print
+        rgb_img |> display
+    end
+    return nothing
+end
+
 # save("render.png", rgb_img)
 # save("render.exr", rgb_img)
 
