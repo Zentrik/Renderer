@@ -10,10 +10,11 @@ const Spectrum = SVector{3, Float64}
     direction = Point(0, 1, 0)
     # @assert norm(direction) ≈ 1
 end
+(ray::Ray)(t) = ray.origin + t * ray.direction
 
 @with_kw struct Sphere
     centre::Point = zeros(Point)
-    radius::Float64 = 0.5
+    radius::Float64 = 1//2
     colour::Spectrum = ones(Spectrum)
     scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = (ray, n) -> sample_hemisphere(n)
 end
@@ -21,10 +22,10 @@ end
 imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
 
 @with_kw struct Camera{T<:Real} @deftype Point
-    right = Point(2 * 16/9, 0, 0) / 400
-	down = - Point(0, 0, 2) / imagesize(nx, 16/9)[2]
+    right = Point(2 * 16//9, 0, 0) // 400
+	down = - Point(0, 0, 2) / imagesize(nx, 16//9)[2]
 
-    upper_left_corner = Point(-16/9, 1, 1)
+    upper_left_corner = Point(-16//9, 1, 1)
 	pinhole_location = zeros(Point)
 
     lens_radius::T = 0
@@ -62,7 +63,7 @@ end
 
 norm2(x) = x ⋅ x
 
-function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
+@inline @fastmath function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1 # @inline together gives 4x speedup for render. @fastmath gives 2% speedup?
     origin_to_centre = ray.origin - sphere.centre
     half_b = ray.direction ⋅ origin_to_centre
     c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
@@ -82,16 +83,13 @@ function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.directi
             return -one(c)
         end
     end
-    return origin_to_centre
 end
 
 normal(sphere::Sphere, position) = (position - sphere.centre) / sphere.radius
 
-advance(ray, t) = ray.origin + t * ray.direction
-
 function world(ray)
     interp = (ray.direction.z + 1) / 2
-    return (1 - interp) * SA[1, 1, 1] + interp * SA[0.5, 0.7, 1.0] # using SA instead of Spectrum saves 1mb, 0.2s 
+    return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0) # Spectrum{3, Float64} instead of Spectrum{3, T} saves 1mb, 0.2s for nx=50. 
 end
 
 function sample_circle()
@@ -99,15 +97,21 @@ function sample_circle()
     return SA[cos(θ), sin(θ)]
 end
 
-function sample_hemisphere(n⃗)
+function sample_sphere()
     ξ₁ = 2 * rand() - 1
     ξ₂ = rand()
-    
-    sample = SA[cos(2π * ξ₂) * sqrt(1 - ξ₁^2), sin(2π * ξ₂) * sqrt(1 - ξ₁^2), ξ₁]
+
+    # sample = oftype(n⃗, [cos(2π * ξ₂) * sqrt(1 - ξ₁^2), sin(2π * ξ₂) * sqrt(1 - ξ₁^2), ξ₁])
+    return Point(cos(2π * ξ₂) * sqrt(1 - ξ₁^2), sin(2π * ξ₂) * sqrt(1 - ξ₁^2), ξ₁) # allocates memory some times? (seems fine now?)
+end
+
+function sample_hemisphere(n⃗::SVector{3, Float64})::Point
+    sample = sample_sphere()
     if sample ⋅ n⃗ < 0
-        sample *= -1
+       return -sample
+    else
+        return sample
     end
-    return sample
 end
 
 function reflect(ray, n⃗, fuzz=0)
@@ -157,7 +161,7 @@ metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz)
 
 function findSceneIntersection(ray, hittable_list::Vector{Sphere}, tmin, tmax)
     hitIndex = 0
-    for i in eachindex(hittable_list)
+    for i in eachindex(hittable_list) # enumerate 1μs slower
         t = intersect(ray, hittable_list[i], tmin, tmax)
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
@@ -179,7 +183,7 @@ function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
         return world(ray)
     else
         hit = hittable_list[hitIndex]
-        position = advance(ray, t)
+        position = ray(t)
         n⃗ = normal(hit, position)
 
         ray = Ray(position, hit.scatter(ray, n⃗))
@@ -230,90 +234,58 @@ function rendexPixel(HittableList, maxDepth, pixel_position, camera)
     return rayColour(ray, HittableList, maxDepth)
 end
 
-function render(nx, ny, camera=Camera(), print=true)
-    # sphere1 = Sphere([0, 1, -100.5], 100, Diffuse([0.8, 0.8, 0]))
-    # sphere2 = Sphere(centre=[0, 1, 0], material=Diffuse([0.1, 0.2, 0.5]))
-    # sphere3 = Sphere(centre=[-1, 1, 0], material=Glass(ior = 1.5))
-    # sphere4 = Sphere(centre=[1, 1, 0], material=Metal([0.8, 0.6, 0.2], 0))
-    # sphere5 = Sphere([-1, 1, 0], -.45, Glass(ior = 1.5))
+function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16)
+    # for index in CartesianIndices(img)
+    #     for sample in 1:samples_per_pixel
+    #         img[index] += rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera)
+    #     end
+    # end
 
-    # HittableList = SA[sphere1, sphere2, sphere3, sphere4, sphere5]
+    ThreadsX.map!(index -> sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel), img, CartesianIndices(img))
 
-    HittableList = scene_random_spheres()
+    # Threads.@threads for index in CartesianIndices(img) # Seems a bit slower thatn ThreadsX ∼5%
+    #     img[index] = sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel)
+    # end
 
-    img = zeros(Spectrum, ny, nx)
+    img ./= samples_per_pixel
 
-    samples_per_pixel = 10
-    maxDepth = 5
-
-    # img = map(index -> sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel), CartesianIndices(img))
-
-    for index in CartesianIndices(img)
-        for sample in 1:samples_per_pixel
-            img[index] += rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera)
-        end
-    end
-
-    img /= samples_per_pixel
-    
-    if print
-        map(x -> RGB(x...), img) |> display
-    end
-
-    return img, map(x -> RGB(x...), img)
+    return nothing
 end
     
-render(nx=400) = render(imagesize(nx, 16/9)..., Camera(imagesize(nx, 16/9)...))
-
 # @code_warntype rendexPixel(scene_random_spheres(), 10, Point(0, 0, 1), Camera());
 # @code_warntype rayColour(Ray(), scene_random_spheres(), 10, 1e-4, Inf);
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
 
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
+
 using Profile, PProf
 function profile()
-    spectrum_img, rgb_img = render(imagesize(50, 16/9)..., Camera(imagesize(50, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10), false);
-    Profile.Allocs.clear(); 
-    @time Profile.Allocs.@profile sample_rate=1 spectrum_img, rgb_img = render(imagesize(50, 16/9)..., Camera(imagesize(50, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10), false);
-    PProf.Allocs.pprof(from_c=false, webport=8080)
-end
-function test(img, samples_per_pixel, maxDepth, HittableList, camera)
-    for index in CartesianIndices(img)
-        for sample in 1:samples_per_pixel
-            img[index] += rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera)
-        end
-    end
-    # return img /= samples_per_pixel
-end
-function profilenosetup()
-    spectrum_img, rgb_img = render(imagesize(50, 16/9)..., Camera(imagesize(50, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10), false);
-
-    nx, ny = imagesize(50, 16/9)
-    camera = Camera(imagesize(50, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-
-    HittableList = scene_random_spheres()
-
-    img = zeros(Spectrum, ny, nx)
-
-    samples_per_pixel = 10
-    maxDepth = 5
+    scene = scene_random_spheres()
+    img = zeros(Spectrum, imagesize(10, 16//9)...)
+    camera = Camera(imagesize(10, 16//9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    spectrum_img, rgb_img = render!(img, scene, camera)
 
     Profile.Allocs.clear(); 
 
-    @time Profile.Allocs.@profile sample_rate=1 test(img, samples_per_pixel, maxDepth, HittableList, camera)
+    @time Profile.Allocs.@profile sample_rate=1 spectrum_img, rgb_img = render!(img, scene, camera)
 
     PProf.Allocs.pprof(from_c=false, webport=8080)
 end
 
 
 using BenchmarkTools
-function benchmark()
-    @benchmark spectrum_img, rgb_img = render(imagesize(50, 16/9)..., Camera(imagesize(50, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10), false)
+function run(print=false)
+    scene = scene_random_spheres()
+    spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
+    @time render!(spectrum_img, scene, Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10), samples_per_pixel=1000)
+    rgb_img = map(x -> RGB(x...), spectrum_img)
+    if print
+        rgb_img |> display
+    end
+    return rgb_img
 end
-function run()
-    spectrum_img, rgb_img = render(imagesize(50, 16/9)..., Camera(imagesize(50, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10))
-end
+
 # @btime spectrum_img, rgb_img = render(imagesize(50, 16/9)..., Camera(imagesize(50, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10), false) # 6.990 s (8986595 allocations: 716.80 MiB)
 # save("render.png", rgb_img)
 # save("render.exr", rgb_img)
