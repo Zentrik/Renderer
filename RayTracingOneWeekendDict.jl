@@ -13,6 +13,12 @@ end
 
 abstract type Material end
 
+@with_kw struct Sphere{M<:Material}
+    centre::Point = zeros(Point)
+    radius::T = 0.5
+    material::M = Diffuse() # saves 20gb, and speeds up significantly
+end
+
 @with_kw struct Diffuse <: Material
     attenuation::Spectrum = ones(Spectrum)
 end
@@ -27,34 +33,13 @@ end
     ior::T = 1.5
 end
 
-@with_kw struct MaterialRef
-    material_type_index::UInt64
-    index::UInt64
-end
-
-import Base.findfirst
-function findfirst(list, element::Type)
-    for (i, each) in enumerate(list)
-        if each == element
-            return i
-        end
+function generateDict(list)
+    dict = Dict{DataType, Vector{Sphere}}()
+    for each in list
+        vals = get!(Vector{typeof(each)}, dict, typeof(each))
+        push!(vals, each)
     end
-end
-
-function store_material(material_storage, new_material)
-    material_types = [each for each in subtypes(Material)] # makes it Vector{DataType}, whilst subtypes returns Vector{Any}.
-
-    material_type_index = findfirst(material_types, typeof(new_material))
-    storage = material_storage[material_type_index]
-    push!(storage, new_material)
-    return MaterialRef(material_type_index, lastindex(storage))
-end
-
-@with_kw struct Sphere
-    centre::Point = zeros(Point)
-    radius::T = 0.5
-    materialref::MaterialRef # saves 20gb, and speeds up significantly
-    Sphere(material_storage, centre=zeros(Point), radius=T(1/2), material::Material=Diffuse()) = new(centre, radius, store_material(material_storage, material))
+    return dict
 end
 
 imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
@@ -101,7 +86,7 @@ end
 
 @inline norm2(x) = x ⋅ x
 
-function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
+@fastmath function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1
     origin_to_centre = ray.origin - sphere.centre
     half_b = ray.direction ⋅ origin_to_centre
     c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
@@ -171,7 +156,7 @@ end
     return r0 = (1 - r0) * (1 - cosθ)^5
 end
 
-function scatter(material::Glass, ray, n⃗)
+function glass(ray, n⃗, ior)
     air_ior = 1
 
     cosθ = - ray.direction ⋅ n⃗
@@ -180,9 +165,9 @@ function scatter(material::Glass, ray, n⃗)
     sinθ = sqrt(1 - cosθ^2)
     
     if into
-        ior_ratio = air_ior / material.ior
+        ior_ratio = air_ior / ior
     else
-        ior_ratio = material.ior / air_ior
+        ior_ratio = ior / air_ior
         n⃗ *= -1
         cosθ *= -1
     end
@@ -198,15 +183,7 @@ function scatter(material::Glass, ray, n⃗)
     end
 end
 
-function scatter(material::Diffuse, ray, n⃗)
-    return sample_hemisphere(n⃗)
-end
-
-function scatter(material::Metal, ray, n⃗)
-    return reflect(ray, n⃗, material.fuzz)
-end
-
-function findSceneIntersection(ray, hittable_list, tmin, tmax)
+function findSceneIntersection(ray, hittable_list::Vector{Sphere}, tmin, tmax)
     hitIndex = 0
     for i in eachindex(hittable_list)
         t = intersect(ray, hittable_list[i], tmin, tmax)
@@ -219,20 +196,52 @@ function findSceneIntersection(ray, hittable_list, tmin, tmax)
     return (tmax, hitIndex)
 end
 
-function proccess_hit(hit, material_type_storage, material_type_index)
-    if hit.materialref.material_type_index == material_type_index
-        material = material_type_storage[hit.materialref.index]
-        return scatter(material, ray, n⃗), material.attenuation
+function findSceneIntersection(ray, hittable_list::Dict, tmin, tmax)
+    hitIndex = 0
+    key = collect(keys(hittable_list))[1]
+    for (type, hittable) in hittable_list
+        (t, index) = findSceneIntersection(ray, hittable, tmin, tmax)
+        if index != 0 # if index != 0 then an intersection was found
+            tmax = t
+            hitIndex = index
+            key = type
+        end
+    end
+
+    return (tmax, key, hitIndex)
+end
+
+function rayColour(ray, hittable_list::Dict, depth, tmin=1e-4, tmax=Inf)::Spectrum
+    if depth == 0
+        return zeros(Spectrum)
+    end
+
+    t, key, hitIndex = findSceneIntersection(ray, hittable_list, tmin, tmax)
+
+    if t == Inf # nothing hit
+        return world(ray)
+    else
+        @assert hitIndex != 0
+        hit = get(hittable_list, key, nothing)[hitIndex]
+        position = advance(ray, t)
+        n⃗ = normal(hit, position)
+
+        if typeof(hit.material) == Diffuse
+            direction = sample_hemisphere(n⃗)
+            # direction = hackyway(n⃗)
+            # direction = lambertian(n⃗)
+        elseif typeof(hit.material) == Metal
+            direction = reflect(ray, n⃗, hit.material.fuzz)
+        elseif typeof(hit.material) == Glass
+            direction = glass(ray, n⃗, hit.material.ior)
+        end
+
+        ray = Ray(position, direction)
+        return rayColour(ray, hittable_list, depth - 1) .* hit.material.attenuation
     end
 end
 
-@noinline function proccess_hit(hit, material_type_storage)::Tuple{Point, Spectrum}
-    material = material_type_storage[hit.materialref.index]
-    return scatter(material, ray, n⃗), material.attenuation
-end
-
-
-function rayColour(ray, hittable_list, material_storage, depth, tmin=1e-4, tmax=Inf)::Spectrum
+function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
     if depth == 0
         return zeros(Spectrum)
     end
@@ -246,16 +255,22 @@ function rayColour(ray, hittable_list, material_storage, depth, tmin=1e-4, tmax=
         position = advance(ray, t)
         n⃗ = normal(hit, position)
 
-        direction, attenuation = process_hit(hit, material_storage[hit.materialref.material_type_index])
+        if typeof(hit.material) == Diffuse
+            direction = sample_hemisphere(n⃗)
+        elseif typeof(hit.material) == Metal
+            direction = reflect(ray, n⃗, hit.material.fuzz)
+        elseif typeof(hit.material) == Glass
+            direction = glass(ray, n⃗, hit.material.ior)
+        end
 
         ray = Ray(position, direction)
-        return rayColour(ray, hittable_list, material_storage, depth - 1) .* attenuation
+        return rayColour(ray, hittable_list, depth - 1) .* hit.material.attenuation
     end
 end
 
-function scene_random_spheres(material_storage)
+function scene_random_spheres()
 	HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
-	push!(HittableList, Sphere(material_storage, [0, 0, -1000], 1000, Diffuse([.5, .5, .5])))
+	push!(HittableList, Sphere([0, 0, -1000], 1000, Diffuse([.5, .5, .5])))
 
 	for a in -11:10, b in -11:10
 		choose_mat = rand(T)
@@ -267,25 +282,25 @@ function scene_random_spheres(material_storage)
 		if choose_mat < T(0.8)
 			# diffuse
 			albedo = rand(Spectrum) .* rand(Spectrum)
-			push!(HittableList, Sphere(material_storage, center, 0.2, Diffuse(albedo)))
+			push!(HittableList, Sphere(center, 0.2, Diffuse(albedo)))
 		elseif choose_mat < T(0.95)
 			# metal
 			albedo = rand(Spectrum) / 2 .+ 1/2
 			fuzz = rand(T) * 5
-			push!(HittableList, Sphere(material_storage, center, 0.2, Metal(albedo, fuzz)))
+			push!(HittableList, Sphere(center, 0.2, Metal(albedo, fuzz)))
 		else
 			# glass
-			push!(HittableList, Sphere(material_storage, center, 0.2, Glass()))
+			push!(HittableList, Sphere(center, 0.2, Glass()))
 		end
 	end
 
-	push!(HittableList, Sphere(material_storage, [0,0,1], 1, Glass()))
-	push!(HittableList, Sphere(material_storage, [-4,0,1], 1, Diffuse([0.4,0.2,0.1])))
-	push!(HittableList, Sphere(material_storage, [4,0,1], 1, Metal(attenuation=[0.7,0.6,0.5])))
-    return HittableList #HittableDict(HittableList) #SVector{length(HittableList), Sphere}(HittableList)
+	push!(HittableList, Sphere([0,0,1], 1, Glass()))
+	push!(HittableList, Sphere([-4,0,1], 1, Diffuse([0.4,0.2,0.1])))
+	push!(HittableList, Sphere([4,0,1], 1, Metal(attenuation=[0.7,0.6,0.5])))
+    return generateDict(HittableList) #HittableDict(HittableList) #SVector{length(HittableList), Sphere}(HittableList)
 end
 
-function rendexPixel(HittableList, material_storage, maxDepth, pixel_position, camera)
+function rendexPixel(HittableList, maxDepth, pixel_position, camera)
     random_pixel_position = pixel_position + rand(T) * camera.right + rand(T) * camera.down # Is this correct when multithreaded?
 
     defocus_random = camera.lens_radius * sample_circle()
@@ -293,12 +308,10 @@ function rendexPixel(HittableList, material_storage, maxDepth, pixel_position, c
 
     ray = Ray(camera.pinhole_location + defocus_offset, normalize(random_pixel_position - camera.pinhole_location - defocus_offset))
 
-    return rayColour(ray, HittableList, material_storage, maxDepth)
+    return rayColour(ray, HittableList, maxDepth)
 end
 
 function render(nx, ny, camera=Camera(), print=true)
-    material_storage = collect(Vector{T}() for T in  subtypes(Material))
-
     # sphere1 = Sphere([0, 1, -100.5], 100, Diffuse([0.8, 0.8, 0]))
     # sphere2 = Sphere(centre=[0, 1, 0], material=Diffuse([0.1, 0.2, 0.5]))
     # sphere3 = Sphere(centre=[-1, 1, 0], material=Glass(ior = 1.5))
@@ -307,14 +320,20 @@ function render(nx, ny, camera=Camera(), print=true)
 
     # HittableList = SA[sphere1, sphere2, sphere3, sphere4, sphere5]
 
-    HittableList = scene_random_spheres(material_storage)
+    HittableList = scene_random_spheres()
 
     img = zeros(Spectrum, ny, nx)
 
-    samples_per_pixel = 5
+    samples_per_pixel = 50
     maxDepth = 16
 
-    img = ThreadsX.map(index -> sum(rendexPixel(HittableList, material_storage, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel), CartesianIndices(img))
+    img = ThreadsX.map(index -> sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel), CartesianIndices(img))
+
+    # @showprogress for index in CartesianIndices(img)
+    #     for sample in 1:samples_per_pixel
+    #         img[index] += rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera)
+    #     end
+    # end
 
     img /= samples_per_pixel
     
@@ -328,19 +347,15 @@ end
 render(nx=400) = render(imagesize(nx, 16/9)..., Camera(imagesize(nx, 16/9)...))
 
 # @code_warntype rendexPixel(scene_random_spheres(), 10, Point(0, 0, 1), Camera());
-# @code_warntype rayColour(Ray(), scene_random_spheres(), 10, 1e-4, Inf);
+# @code_warntype rayColour(Ray(), scene_random_spheres(), 10);
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
 # @code_warntype findSceneIntersection(Ray(), collect(values(scene_random_spheres()))[1], 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
-
-testmaterial = collect(Vector{T}() for T in  subtypes(Material))
-testscene = scene_random_spheres(testmaterial)
-
-@code_warntype rayColour(Ray(), testscene, testmaterial, 10, 1e-4, Inf);
+# @code_warntype intersect(Ray(), collect(values(scene_random_spheres()))[1][1], 1e-4, Inf)
 
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
-# using BenchmarkTools
-# @btime spectrum_img, rgb_img = render(imagesize(40, 16/9)..., Camera(imagesize(40, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)); # 11.884 s (82113219 allocations: 3.65 GiB)
+using BenchmarkTools
+@btime spectrum_img, rgb_img = render(imagesize(400, 16/9)..., Camera(imagesize(400, 16/9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)); # 11.884 s (82113219 allocations: 3.65 GiB)
 # save("render.png", rgb_img)
 # save("render.exr", rgb_img)
 
