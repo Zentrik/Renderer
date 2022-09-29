@@ -1,4 +1,4 @@
-using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers
+using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers, RecursiveArrayTools
 import FunctionWrappers: FunctionWrapper
 
 const T = Float64
@@ -29,23 +29,18 @@ end
     scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = (ray, n) -> sample_hemisphere(n)
 end
 
-@with_kw struct Scene{T, R} <: Primitive
-    Sphere::T = [Sphere()]
-    Sphere2::R = [Sphere2()]
-end
-
 imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
 
 @with_kw struct Camera{T<:Real} @deftype Point
-    right = Point(2 * 16//9, 0, 0) // 400
-	down = - Point(0, 0, 2) / imagesize(nx, 16//9)[2]
+    right = Point(2 * 16//9, 0, 0) / 400
+	down = - Point(0, 0, 2) / imagesize(400, 16//9)[2]
 
     upper_left_corner = Point(-16//9, 1, 1)
 	pinhole_location = zeros(Point)
 
     lens_radius::T = 0
 
-    function Camera(nx=400, ny=imagesize(nx, 16/9)[2], camera_height=2, camera_centre=Point(0, 1, 0), lens_radius::T=0, focus_distance=1)  where T
+    function Camera(nx=400, ny=imagesize(nx, 16/9)[2], camera_height=2, camera_centre=Point(0, 1, 0), lens_radius::T=0, focus_distance=1) where T
         aspect_ratio = nx/ny
 
         camera_height *= focus_distance
@@ -72,6 +67,9 @@ imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
         camera_centre = pinhole_location + w * focus_distance
         upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
 
+        return new{T}(right, down, upper_left_corner, pinhole_location, lens_radius)
+    end
+    function Camera(right=Point(2 * 16//9, 0, 0) / 400, down=- Point(0, 0, 2) / imagesize(400, 16//9)[2], upper_left_corner=Point(-16//9, 1, 1), pinhole_location=zeros(Point), lens_radius::T = 0) where T
         return new{T}(right, down, upper_left_corner, pinhole_location, lens_radius)
     end
 end
@@ -186,28 +184,29 @@ metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
 
 function findSceneIntersection(ray, hittable_list, tmin, tmax)
     hitIndex = 0
-
-    fieldnames = [:Sphere, :Sphere2]
-    objectType = fieldnames[1]
     
-    for i in eachindex(hittable_list.Sphere)
-        t = intersect(ray, hittable_list.Sphere[i], tmin, tmax)
+    for i in eachindex(hittable_list)
+        t = intersect(ray, hittable_list[i], tmin, tmax)
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
             hitIndex = i
-            objectType = :Sphere
-        end
-    end
-    for i in eachindex(hittable_list.Sphere2)
-        t = intersect(ray, hittable_list.Sphere2[i], tmin, tmax)
-        if t > 0 # we know t ≤ tmax as t is the result of intersect
-            tmax = t
-            hitIndex = i
-            objectType = :Sphere2
         end
     end
 
-    return (tmax, hitIndex, objectType)
+    return (tmax, hitIndex)
+end
+
+function scatter(hit::P, ray, n⃗)::Point where P<:Primitive
+    return hit.scatter(ray, n⃗)
+end
+function colour(hit::P)::Spectrum where P<:Primitive
+    return hit.colour
+end
+
+function processHit(hit::P, ray, position) where P<:Primitive
+    n⃗ = normal(hit, position)
+
+    return hit.scatter(ray, n⃗), hit.colour
 end
 
 function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
@@ -215,23 +214,24 @@ function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
         return zeros(Spectrum)
     end
 
-    t, hitIndex, objectType = findSceneIntersection(ray, hittable_list, tmin, tmax)
+    t, hitIndex = findSceneIntersection(ray, hittable_list, tmin, tmax)
 
-    if t == Inf # nothing hit
+    if t == Inf #|| hit == nothing # nothing hit
         return world(ray)
     else
-        hit = getfield(hittable_list, objectType)[hitIndex]
+        hit = hittable_list[hitIndex]
         position = ray(t)
-        n⃗ = normal(hit, position)
 
-        ray = Ray(position, hit.scatter(ray, n⃗))
-        return rayColour(ray, hittable_list, depth - 1) .* hit.colour
+        direction, colour = processHit(hit, ray, position)
+
+        ray = Ray(position, direction)
+        return rayColour(ray, hittable_list, depth - 1) .* colour
     end
 end
 
 function scene_random_spheres()
-	# HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
-    HittableList = [Sphere([0, 0, -1000], 1000, [.5, .5, .5], diffuse)]
+	# HittableList = Primitive[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
+    HittableList = Primitive[Sphere([0, 0, -1000], 1000, [.5, .5, .5], diffuse)]
 
 	for a in -11:10, b in -11:10
 		choose_mat = rand()
@@ -297,12 +297,28 @@ end
 
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
 
+function generateDict(HittableList)
+    dict = Dict{DataType, Vector{Primitive}}()
+    for each in HittableList
+        vals = get!(Vector{typeof(each)}, dict, typeof(each))
+        push!(vals, each)
+    end
+    return dict
+end
+
+function generatePartition(HittableList)
+    HittableDict = generateDict(HittableList)
+    return ArrayPartition([[each for each in type] for type in values(HittableDict)]...) # we construct an array so that each nested vector is of the type and not Primitive.
+end 
+
 function run(print=false)
-    HittableList = scene_random_spheres()
-    scene = Scene(HittableList, [Sphere2()])
+    HittableList = scene_random_spheres();
+    push!(HittableList, Sphere2());
+    push!(HittableList, Sphere2(radius=10));
+    scene = generatePartition(HittableList);
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=100)
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=1)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -312,8 +328,11 @@ end
 
 using Profile, PProf
 function profile()
-    scene = scene_random_spheres()
-    spectrum_img = zeros(Spectrum, reverse(imagesize(100, 16//9))...)
+    HittableList = scene_random_spheres()
+    push!(HittableList, Sphere2())
+    push!(HittableList, Sphere2(radius=10))
+    scene = generatePartition(HittableList)
+    spectrum_img = zeros(Spectrum, reverse(imagesize(50, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     render!(spectrum_img, scene, camera)
 
