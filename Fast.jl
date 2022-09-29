@@ -181,7 +181,7 @@ metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
 
 const initialRecord = HitRecord(Sphere())
 
-@inline function findSceneIntersection(ray, hittable_list, tmin, tmax)
+function findSceneIntersection(ray, hittable_list, tmin, tmax)
     record = initialRecord
     
     for i in eachindex(hittable_list.Sphere)
