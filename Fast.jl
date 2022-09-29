@@ -20,6 +20,8 @@ abstract type Primitive end
     radius::T = 1//2
     colour::Spectrum = ones(Spectrum)
     scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = (ray, n) -> sample_hemisphere(n)
+    normal::FunctionWrapper{Point, Tuple{Point}} 
+    Sphere(centre=zeros(Point), radius=1//2, colour=ones(Spectrum), scatter=diffuse) = new(centre, radius, colour, scatter, (position) -> (position - centre) / radius)
 end
 
 @with_kw struct Sphere2 <: Primitive
@@ -27,9 +29,11 @@ end
     radius::T = 1//2
     colour::Spectrum = ones(Spectrum)
     scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = (ray, n) -> sample_hemisphere(n)
+    normal::FunctionWrapper{Point, Tuple{Point}} 
+    Sphere2(centre=zeros(Point), radius=1//2, colour=ones(Spectrum), scatter=diffuse) = new(centre, radius, colour, scatter, (position) -> (position - centre) / radius)
 end
 
-@with_kw struct Scene{T, R} <: Primitive
+@with_kw struct Scene{T, R}
     Sphere::T = [Sphere()]
     Sphere2::R = [Sphere2()]
 end
@@ -183,31 +187,38 @@ end
 glass(ior=3//2) = (ray, n⃗) -> glass(ray, n⃗, ior)
 diffuse(ray, n) = sample_hemisphere(n)
 metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
+struct HitRecord
+    normal::FunctionWrapper{Point, Tuple{Point}}
+    colour::Spectrum
+    scatter::FunctionWrapper{Point, Tuple{Ray, Point}}
+end
+function HitRecord(primitive::P) where P<:Primitive
+    HitRecord(primitive.normal, primitive.colour, primitive.scatter)
+end
+function (h::HitRecord)(position, ray)::Tuple{Point, Spectrum}
+    return (h.scatter(ray, h.normal(position)), h.colour)
+end
+const initialRecord = HitRecord(Sphere())
 
-function findSceneIntersection(ray, hittable_list, tmin, tmax)
-    hitIndex = 0
-
-    fieldnames = [:Sphere, :Sphere2]
-    objectType = fieldnames[1]
+@inline function findSceneIntersection(ray, hittable_list, tmin, tmax)
+    record = initialRecord
     
     for i in eachindex(hittable_list.Sphere)
         t = intersect(ray, hittable_list.Sphere[i], tmin, tmax)
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
-            hitIndex = i
-            objectType = :Sphere
+            record = HitRecord(hittable_list.Sphere[i])
         end
     end
     for i in eachindex(hittable_list.Sphere2)
         t = intersect(ray, hittable_list.Sphere2[i], tmin, tmax)
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
-            hitIndex = i
-            objectType = :Sphere2
+            record = HitRecord(hittable_list.Sphere2[i])
         end
     end
 
-    return (tmax, hitIndex, objectType)
+    return (tmax, record)
 end
 
 function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
@@ -215,17 +226,16 @@ function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
         return zeros(Spectrum)
     end
 
-    t, hitIndex, objectType = findSceneIntersection(ray, hittable_list, tmin, tmax)
+    t, record = findSceneIntersection(ray, hittable_list, tmin, tmax)
 
-    if t == Inf # nothing hit
+    if t == tmax # nothing hit
         return world(ray)
     else
-        hit = getfield(hittable_list, objectType)[hitIndex]
         position = ray(t)
-        n⃗ = normal(hit, position)
+        direction, colour = record(position, ray) 
 
-        ray = Ray(position, hit.scatter(ray, n⃗))
-        return rayColour(ray, hittable_list, depth - 1) .* hit.colour
+        ray = Ray(position, direction)
+        return rayColour(ray, hittable_list, depth - 1) .* colour
     end
 end
 
@@ -298,11 +308,11 @@ end
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
 
 function run(print=false)
-    HittableList = scene_random_spheres()
-    scene = Scene(HittableList, [Sphere2()])
+    HittableList = scene_random_spheres();
+    scene = Scene(HittableList, [Sphere2()]);
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=100)
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=1000)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -312,10 +322,11 @@ end
 
 using Profile, PProf
 function profile()
-    scene = scene_random_spheres()
-    spectrum_img = zeros(Spectrum, reverse(imagesize(100, 16//9))...)
+    HittableList = scene_random_spheres();
+    scene = Scene(HittableList, [Sphere2()]);
+    spectrum_img = zeros(Spectrum, reverse(imagesize(10, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    render!(spectrum_img, scene, camera)
+    render!(spectrum_img, scene, camera, samples_per_pixel=10)
 
     Profile.Allocs.clear(); 
 
