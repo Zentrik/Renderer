@@ -1,6 +1,5 @@
 using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers
 import FunctionWrappers: FunctionWrapper
-include("MethodWrapper.jl")
 
 const T = Float64
 const Point = SVector{3, T} # We use define Float64 so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
@@ -13,14 +12,27 @@ const Spectrum = SVector{3, T}
     # @assert norm(direction) ≈ 1
 end
 (ray::Ray)(t) = ray.origin + t * ray.direction
-@with_kw struct Object
-    # intersect::MethodWrapper = MethodWrapper{typeof(sphere_intersection(zeros(Point), 1//2)), Tuple{Ray, T, T}, T}(sphere_intersection(zeros(Point), 1//2)) #Super slow
-    intersect::FunctionWrapper{T, Tuple{Ray, T, T}} = sphere_intersection(zeros(Point), 1//2) # we lose inlining by doing this which slows stuff down a lot.
-    normal::FunctionWrapper{Point, Tuple{Point}} = sphere_normal(zeros(Point), 1//2)
+
+abstract type Primitive end
+
+@with_kw struct Sphere <: Primitive
+    centre::Point = zeros(Point)
+    radius::T = 1//2
     colour::Spectrum = ones(Spectrum)
-    scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = diffuse
+    scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = (ray, n) -> sample_hemisphere(n)
 end
-Sphere(centre, radius, colour, scatter) = Object(MethodWrapper{typeof(sphere_intersection(centre, radius)), Tuple{Ray, T, T}, T}(sphere_intersection(centre, radius)), sphere_normal(centre, radius), colour, scatter)
+
+@with_kw struct Sphere2 <: Primitive
+    centre::Point = zeros(Point)
+    radius::T = 1//2
+    colour::Spectrum = ones(Spectrum)
+    scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = (ray, n) -> sample_hemisphere(n)
+end
+
+@with_kw struct Scene{T, R} <: Primitive
+    Sphere::T = [Sphere()]
+    Sphere2::R = [Sphere2()]
+end
 
 imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
 
@@ -67,10 +79,10 @@ pixelWorldPosition(camera, index) = camera.upper_left_corner + (index[2] - 1) * 
 
 norm2(x) = x ⋅ x
 
-@inline @fastmath function sphere_intersection(centre, radius, ray, tmin, tmax) # Relies on norm(ray.direction) == 1 # @inline together gives 4x speedup for render. @fastmath gives 2% speedup?
-    origin_to_centre = ray.origin - centre
+@inline @fastmath function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1 # @inline together gives 4x speedup for render. @fastmath gives 2% speedup?
+    origin_to_centre = ray.origin - sphere.centre
     half_b = ray.direction ⋅ origin_to_centre
-    c = origin_to_centre ⋅ origin_to_centre - radius^2
+    c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
     quarter_discriminant = half_b^2 - c
     if quarter_discriminant < 0
         return -one(c)
@@ -89,8 +101,16 @@ norm2(x) = x ⋅ x
     end
 end
 
-@inline @fastmath sphere_intersection(centre, radius) = (ray, tmin, tmax) -> sphere_intersection(centre, radius, ray, tmin, tmax)
-@inline @fastmath sphere_normal(centre, radius) = position -> (position - centre) / radius
+@inline @fastmath function intersect(ray, sphere::Sphere2, tmin, tmax) # Relies on norm(ray.direction) == 1 # @inline together gives 4x speedup for render. @fastmath gives 2% speedup?
+    origin_to_centre = ray.origin - sphere.centre
+    half_b = ray.direction ⋅ origin_to_centre
+    c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
+    quarter_discriminant = half_b^2 - c
+    return quarter_discriminant
+end
+
+normal(sphere::Sphere, position) = (position - sphere.centre) / sphere.radius
+normal(sphere::Sphere2, position) = (position - sphere.centre) / sphere.radius + rand(Point)
 
 function world(ray)
     interp = (ray.direction.z + 1) / 2
@@ -166,15 +186,28 @@ metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
 
 function findSceneIntersection(ray, hittable_list, tmin, tmax)
     hitIndex = 0
-    for i in eachindex(hittable_list) # enumerate 1μs slower
-        t = hittable_list[i].intersect(ray, tmin, tmax)
+
+    fieldnames = [:Sphere, :Sphere2]
+    objectType = fieldnames[1]
+    
+    for i in eachindex(hittable_list.Sphere)
+        t = intersect(ray, hittable_list.Sphere[i], tmin, tmax)
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
             hitIndex = i
+            objectType = :Sphere
+        end
+    end
+    for i in eachindex(hittable_list.Sphere2)
+        t = intersect(ray, hittable_list.Sphere2[i], tmin, tmax)
+        if t > 0 # we know t ≤ tmax as t is the result of intersect
+            tmax = t
+            hitIndex = i
+            objectType = :Sphere2
         end
     end
 
-    return (tmax, hitIndex)
+    return (tmax, hitIndex, objectType)
 end
 
 function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
@@ -182,14 +215,14 @@ function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
         return zeros(Spectrum)
     end
 
-    t, hitIndex = findSceneIntersection(ray, hittable_list, tmin, tmax)
+    t, hitIndex, objectType = findSceneIntersection(ray, hittable_list, tmin, tmax)
 
     if t == Inf # nothing hit
         return world(ray)
     else
-        hit = hittable_list[hitIndex]
+        hit = getfield(hittable_list, objectType)[hitIndex]
         position = ray(t)
-        n⃗ = hit.normal(position)
+        n⃗ = normal(hit, position)
 
         ray = Ray(position, hit.scatter(ray, n⃗))
         return rayColour(ray, hittable_list, depth - 1) .* hit.colour
@@ -265,10 +298,11 @@ end
 # @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
 
 function run(print=false)
-    scene = scene_random_spheres()
+    HittableList = scene_random_spheres()
+    scene = Scene(HittableList, [Sphere2()])
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=2)
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=100)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -295,7 +329,7 @@ function benchmark(print=false)
     scene = scene_random_spheres()
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @btime render!($spectrum_img, $scene, $camera, samples_per_pixel=2)
+    @btime render!($spectrum_img, $scene, $camera, samples_per_pixel=100)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
