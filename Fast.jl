@@ -24,18 +24,20 @@ abstract type Primitive end
     Sphere(centre=zeros(Point), radius=1//2, colour=ones(Spectrum), scatter=diffuse) = new(centre, radius, colour, scatter, (position) -> (position - centre) / radius)
 end
 
-@with_kw struct Sphere2 <: Primitive
-    centre::Point = zeros(Point)
-    radius::T = 1//2
-    colour::Spectrum = ones(Spectrum)
-    scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = (ray, n) -> sample_hemisphere(n)
-    normal::FunctionWrapper{Point, Tuple{Point}} 
-    Sphere2(centre=zeros(Point), radius=1//2, colour=ones(Spectrum), scatter=diffuse) = new(centre, radius, colour, scatter, (position) -> (position - centre) / radius)
+@with_kw struct Scene{T}
+    Sphere::T = [Sphere()]
 end
 
-@with_kw struct Scene{T, R}
-    Sphere::T = [Sphere()]
-    Sphere2::R = [Sphere2()]
+struct HitRecord
+    normal::FunctionWrapper{Point, Tuple{Point}}
+    colour::Spectrum
+    scatter::FunctionWrapper{Point, Tuple{Ray, Point}}
+end
+function HitRecord(primitive::P) where P<:Primitive
+    HitRecord(primitive.normal, primitive.colour, primitive.scatter)
+end
+function (h::HitRecord)(position, ray)::Tuple{Point, Spectrum}
+    return (h.scatter(ray, h.normal(position)), h.colour)
 end
 
 imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
@@ -104,17 +106,6 @@ norm2(x) = x ⋅ x
         end
     end
 end
-
-@inline @fastmath function intersect(ray, sphere::Sphere2, tmin, tmax) # Relies on norm(ray.direction) == 1 # @inline together gives 4x speedup for render. @fastmath gives 2% speedup?
-    origin_to_centre = ray.origin - sphere.centre
-    half_b = ray.direction ⋅ origin_to_centre
-    c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
-    quarter_discriminant = half_b^2 - c
-    return quarter_discriminant
-end
-
-normal(sphere::Sphere, position) = (position - sphere.centre) / sphere.radius
-normal(sphere::Sphere2, position) = (position - sphere.centre) / sphere.radius + rand(Point)
 
 function world(ray)
     interp = (ray.direction.z + 1) / 2
@@ -187,17 +178,7 @@ end
 glass(ior=3//2) = (ray, n⃗) -> glass(ray, n⃗, ior)
 diffuse(ray, n) = sample_hemisphere(n)
 metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
-struct HitRecord
-    normal::FunctionWrapper{Point, Tuple{Point}}
-    colour::Spectrum
-    scatter::FunctionWrapper{Point, Tuple{Ray, Point}}
-end
-function HitRecord(primitive::P) where P<:Primitive
-    HitRecord(primitive.normal, primitive.colour, primitive.scatter)
-end
-function (h::HitRecord)(position, ray)::Tuple{Point, Spectrum}
-    return (h.scatter(ray, h.normal(position)), h.colour)
-end
+
 const initialRecord = HitRecord(Sphere())
 
 @inline function findSceneIntersection(ray, hittable_list, tmin, tmax)
@@ -208,13 +189,6 @@ const initialRecord = HitRecord(Sphere())
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
             record = HitRecord(hittable_list.Sphere[i])
-        end
-    end
-    for i in eachindex(hittable_list.Sphere2)
-        t = intersect(ray, hittable_list.Sphere2[i], tmin, tmax)
-        if t > 0 # we know t ≤ tmax as t is the result of intersect
-            tmax = t
-            record = HitRecord(hittable_list.Sphere2[i])
         end
     end
 
@@ -283,19 +257,7 @@ function renderRay(HittableList, maxDepth, pixel_position, camera)
 end
 
 function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16)
-    # for index in CartesianIndices(img)
-    #     for sample in 1:samples_per_pixel
-    #         img[index] += rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera)
-    #     end
-    # end
-
     ThreadsX.map!(index -> sum(sample -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
-
-    # Threads.@threads for index in CartesianIndices(img) # Seems a bit slower thatn ThreadsX ∼5%
-    #     img[index] = sum(rendexPixel(HittableList, maxDepth, camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down, camera) for sample in 1:samples_per_pixel)
-    # end
-
-    # img ./= samples_per_pixel
 
     return nothing
 end
@@ -305,14 +267,12 @@ end
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
 
-# @enter spectrum_img, rgb_img = render(imagesize(400, 16/9)...)
-
 function run(print=false)
     HittableList = scene_random_spheres();
-    scene = Scene(HittableList, [Sphere2()]);
+    scene = Scene(HittableList);
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=1000)
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=100)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -323,7 +283,7 @@ end
 using Profile, PProf
 function profile()
     HittableList = scene_random_spheres();
-    scene = Scene(HittableList, [Sphere2()]);
+    scene = Scene(HittableList);
     spectrum_img = zeros(Spectrum, reverse(imagesize(10, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     render!(spectrum_img, scene, camera, samples_per_pixel=10)
