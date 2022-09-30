@@ -13,31 +13,26 @@ const Spectrum = SVector{3, T}
 end
 (ray::Ray)(t) = ray.origin + t * ray.direction
 
-abstract type Primitive end
-
-@with_kw struct Sphere <: Primitive
-    centre::Point = zeros(Point)
-    radius::T = 1//2
-    colour::Spectrum = ones(Spectrum)
-    scatter::FunctionWrapper{Point, Tuple{Ray, Point}} = (ray, n) -> sample_hemisphere(n)
-    normal::FunctionWrapper{Point, Tuple{Point}} 
-    Sphere(centre=zeros(Point), radius=1//2, colour=ones(Spectrum), scatter=diffuse) = new(centre, radius, colour, scatter, (position) -> (position - centre) / radius)
-end
-
-@with_kw struct Scene{T}
-    Sphere::T = [Sphere()]
-end
-
 struct HitRecord
-    normal::FunctionWrapper{Point, Tuple{Point}}
     colour::Spectrum
     scatter::FunctionWrapper{Point, Tuple{Ray, Point}}
-end
-function HitRecord(primitive::P) where P<:Primitive
-    HitRecord(primitive.normal, primitive.colour, primitive.scatter)
+    normal::FunctionWrapper{Point, Tuple{Point}}
 end
 function (h::HitRecord)(position, ray)::Tuple{Point, Spectrum}
     return (h.scatter(ray, h.normal(position)), h.colour)
+end
+
+abstract type Primitive end
+
+@with_kw struct Sphere <: Primitive
+    centre::Point
+    radius::T
+    record::HitRecord
+    Sphere(centre=zeros(Point), radius=1//2, colour=ones(Spectrum), scatter=diffuse) = new(centre, radius, HitRecord(colour, scatter, (position) -> (position - centre) / radius))
+end
+
+@with_kw struct Scene{T}
+    Sphere::T = []
 end
 
 imagesize(height, aspectRatio) = (height, round(Int, height / aspectRatio))
@@ -179,7 +174,7 @@ glass(ior=3//2) = (ray, n⃗) -> glass(ray, n⃗, ior)
 diffuse(ray, n) = sample_hemisphere(n)
 metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
 
-const initialRecord = HitRecord(Sphere())
+const initialRecord = Sphere().record
 
 function findSceneIntersection(ray, hittable_list, tmin, tmax)
     record = initialRecord
@@ -188,7 +183,7 @@ function findSceneIntersection(ray, hittable_list, tmin, tmax)
         t = intersect(ray, hittable_list.Sphere[i], tmin, tmax)
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
-            record = HitRecord(hittable_list.Sphere[i])
+            record = hittable_list.Sphere[i].record
         end
     end
 
@@ -272,7 +267,7 @@ function run(print=false)
     scene = Scene(HittableList);
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=100)
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=1000)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
