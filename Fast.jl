@@ -132,7 +132,7 @@ end
 function reflect(ray, n⃗, fuzz=0)
     direction = ray.direction - 2(ray.direction ⋅ n⃗) * n⃗
 
-    if fuzz ≉ 0 
+    if fuzz ≉ 0
         # direction += fuzz * sample_hemisphere(n⃗)
         direction += fuzz * sample_sphere()
     end
@@ -267,12 +267,12 @@ end
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
 
-function run(print=false)
+function run(;print=false, parallel=true)
     HittableList = scene_random_spheres();
-    scene = Scene(HittableList);
+    scene = Scene(Tuple(HittableList));
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=10)
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -290,7 +290,7 @@ function profile()
 
     Profile.Allocs.clear(); 
 
-    @time Profile.Allocs.@profile sample_rate=1 render!(spectrum_img, scene, camera)
+    @time Profile.Allocs.@profile sample_rate=1 render!(spectrum_img, scene, camera, parallel=false)
 
     PProf.Allocs.pprof(from_c=false, webport=8080)
 end
@@ -308,6 +308,8 @@ function benchmark(;print=false, parallel=true)
     end
     return nothing
 end
+# @benchmark findSceneIntersection(ray, scene, 1e-4, Inf) setup=(ray=Ray(); scene=Scene(scene_random_spheres()))
+# @benchmark intersect(ray, sphere, 1e-4, Inf) setup=(ray=Ray(); sphere=Sphere())
 
 # save("render.png", rgb_img)
 # save("render.exr", rgb_img)
