@@ -1,7 +1,7 @@
 using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers
 import FunctionWrappers: FunctionWrapper
 
-const T = Float64
+const T = Float32
 const Point = SVector{3, T} # We use define Float64 so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
 # we dont do const T = Float64 as that makes Point(bla) slow in sample_hemisphere and world() slow. # seems fine now? i think splitting sample_hemisphere into sample_sphere has helpled.
 const Spectrum = SVector{3, T}
@@ -144,14 +144,28 @@ function shick(cosθ, ior_ratio)
     r0 = ((1 - ior_ratio) / (1 + ior_ratio))^2
     return r0 = (1 - r0) * (1 - cosθ)^5
 end
+@inline function sqrtReal(x::Float32) # Is unnecessary for Float64?
+    if x ≤ 0
+        return zero(T)
+    else
+        return sqrt(x)
+    end
+end
+@inline sqrtReal(x::Float64) = sqrt(x)
 
 function glass(ray, n⃗, ior)
     air_ior = 1
 
     cosθ = - ray.direction ⋅ n⃗
     into = cosθ > 0
-    # cosθ = min(cosθ, one(T))
-    sinθ = sqrt(1 - cosθ^2)
+    # if cosθ ≥ 1
+    #     cosθ = 1
+    #     sinθ = 0
+    # else
+    #     sinθ = sqrt(max(0, 1 - cosθ^2))
+    # end
+
+    sinθ = sqrtReal(1 - cosθ^2)
     
     if into
         ior_ratio = air_ior / ior
@@ -165,7 +179,7 @@ function glass(ray, n⃗, ior)
         return normalize(reflect(ray, n⃗))
     else
         Rperp = ior_ratio * (ray.direction + cosθ * n⃗)
-        Rpar = - sqrt(1 - norm2(Rperp)) * n⃗
+        Rpar = - sqrtReal(1 - norm2(Rperp)) * n⃗
 
         return normalize(Rperp + Rpar)
     end
@@ -191,7 +205,7 @@ function findSceneIntersection(ray, hittable_list, tmin, tmax)
     return (tmax, record)
 end
 
-function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
+function rayColour(ray, hittable_list, depth, tmin=T(1e-4), tmax=T(Inf))::Spectrum
     if depth == 0
         return zeros(Spectrum)
     end
@@ -262,10 +276,11 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
     return nothing
 end
     
-# @code_warntype rendexPixel(scene_random_spheres(), 10, Point(0, 0, 1), Camera());
-# @code_warntype rayColour(Ray(), scene_random_spheres(), 10, 1e-4, Inf);
-# @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
-# @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
+# @code_warntype renderRay(scene_random_spheres(), 10, Point(0, 0, 1), camera);
+# @code_warntype rayColour(Ray(), scene_random_spheres(), 10, T(1e-4), T(Inf));
+# @code_warntype findSceneIntersection(Ray(), Scene(scene_random_spheres()), T(1e-4), T(Inf));
+# @code_warntype intersect(Ray(), scene_random_spheres()[1], T(1e-4), T(Inf));
+# @code_warntype glass(Ray(), Point(0, 0, 1), 3//2)
 
 function run(;print=false, parallel=true)
     HittableList = scene_random_spheres();
