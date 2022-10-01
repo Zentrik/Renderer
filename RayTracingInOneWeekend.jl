@@ -28,25 +28,25 @@ abstract type Primitive end
     centre::Point
     radius::T
     record::HitRecord
-    Sphere(centre=zeros(Point), radius=1//2, colour=ones(Spectrum), scatter=diffuse) = new(centre, radius, HitRecord(colour, scatter, (position) -> (position - centre) / radius))
+    Sphere(centre=zeros(Point), radius=1//2, colour=ones(Spectrum), scatter=lambertian) = new(centre, radius, HitRecord(colour, scatter, (position) -> (position - centre) / radius))
 end
 
 @with_kw struct Scene{T}
     Sphere::T = []
 end
 
-imagesize(height, aspectRatio) = round.(Int, (height, height / aspectRatio))
+imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
 
 @with_kw struct Camera{T<:Real} @deftype Point
-    right = Point(2 * 16//9, 0, 0) // 400
-	down = - Point(0, 0, 2) / imagesize(nx, 16//9)[2]
+    right
+	down
 
-    upper_left_corner = Point(-16//9, 1, 1)
-	pinhole_location = zeros(Point)
+    upper_left_corner
+	pinhole_location
 
-    lens_radius::T = 0
+    lens_radius::T
 
-    function Camera(nx=400, ny=imagesize(nx, 16/9)[2], camera_height=2, camera_centre=Point(0, 1, 0), lens_radius::T=0, focus_distance=1)  where T
+    function Camera(nx=400, ny=imagesize(nx, 16/9)[2], camera_height=2, camera_centre=Point(0, 1, 0), lens_radius::T=0, focus_distance=1) where T
         aspect_ratio = nx/ny
 
         camera_height *= focus_distance
@@ -112,20 +112,12 @@ function sample_circle()
     return SA[cos(θ), sin(θ)]
 end
 
-function sample_sphere()
-    ξ₁ = 2 * rand() - 1
-    ξ₂ = rand()
-
-    # sample = oftype(n⃗, [cos(2π * ξ₂) * sqrt(1 - ξ₁^2), sin(2π * ξ₂) * sqrt(1 - ξ₁^2), ξ₁])
-    return Point(cos(2π * ξ₂) * sqrt(1 - ξ₁^2), sin(2π * ξ₂) * sqrt(1 - ξ₁^2), ξ₁) # allocates memory some times? (seems fine now?)
-end
-
-function sample_hemisphere(n⃗)
-    sample = sample_sphere()
-    if sample ⋅ n⃗ < 0
-       return -sample
-    else
-        return sample
+function random_in_unit_sphere()
+    while true
+        sample = rand(Point) * 2 .- 1
+        if norm2(sample) ≤ 1
+            return sample
+        end
     end
 end
 
@@ -133,8 +125,7 @@ function reflect(ray, n⃗, fuzz=0)
     direction = ray.direction - 2(ray.direction ⋅ n⃗) * n⃗
 
     if fuzz ≉ 0 
-        # direction += fuzz * sample_hemisphere(n⃗)
-        direction += fuzz * sample_sphere()
+        direction += fuzz * random_in_unit_sphere()
     end
 
     return normalize(direction)
@@ -171,8 +162,15 @@ function glass(ray, n⃗, ior)
     end
 end
 
+function lambertian(ray, n⃗) 
+    direction = normalize(n⃗ + normalize(random_in_unit_sphere()))
+    if all(direction .≈ 0)
+        direction = n⃗
+    end
+    return direction
+end
+
 glass(ior=3//2) = (ray, n⃗) -> glass(ray, n⃗, ior)
-diffuse(ray, n) = sample_hemisphere(n)
 metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
 
 const initialRecord = Sphere().record
@@ -211,7 +209,7 @@ end
 
 function scene_random_spheres()
 	# HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
-    HittableList = [Sphere([0, 0, -1000], 1000, [.5, .5, .5], diffuse)]
+    HittableList = [Sphere([0, 0, -1000], 1000, [.5, .5, .5], lambertian)]
 
 	for a in -11:10, b in -11:10
 		choose_mat = rand()
@@ -221,9 +219,9 @@ function scene_random_spheres()
 		if norm(center - SA[4,0, 0.2]) < 0.9 continue end 
 			
 		if choose_mat < 4//5
-			# diffuse
+			# lambertian
 			albedo = rand(Spectrum) .* rand(Spectrum)
-			push!(HittableList, Sphere(center, 1//5, albedo, diffuse))
+			push!(HittableList, Sphere(center, 1//5, albedo, lambertian))
 		elseif choose_mat < 95//100
 			# metal
 			albedo = rand(Spectrum) / 2 .+ 1/2
@@ -236,7 +234,7 @@ function scene_random_spheres()
 	end
 
 	push!(HittableList, Sphere([0,0,1], 1, ones(Spectrum), glass()))
-	push!(HittableList, Sphere([-4,0,1], 1, [0.4,0.2,0.1], diffuse))
+	push!(HittableList, Sphere([-4,0,1], 1, [0.4,0.2,0.1], lambertian))
 	push!(HittableList, Sphere([4,0,1], 1, [0.7,0.6,0.5], metal()))
     return HittableList #HittableDict(HittableList) #SVector{length(HittableList), Sphere}(HittableList)
 end
@@ -270,9 +268,9 @@ end
 function run(print=false)
     HittableList = scene_random_spheres();
     scene = Scene(HittableList);
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
+    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=10)
+    @profview render!(spectrum_img, scene, camera, samples_per_pixel=10)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -314,4 +312,4 @@ end
 
 # using ImageContrastAdjustment
 # adjust_histogram(rgb_img, GammaCorrection(gamma=1/2))
-# map(x -> RGB(x.^(1/2)...), spectrum_img)
+# map(x -> RGB(x.^(1/2)...), spectrum_im
