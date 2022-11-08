@@ -1,9 +1,9 @@
-using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers
+using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers # Look into https://github.com/AlgebraicJulia/CompTime.jl
 import FunctionWrappers: FunctionWrapper
 
 const T = Float64
 const Point = SVector{3, T} # We use define Float64 so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
-# we dont do const T = Float64 as that makes Point(bla) slow in sample_hemisphere and world() slow. # seems fine now? i think splitting sample_hemisphere into sample_sphere has helpled.
+# we dont do const T = Float64 as that makes Point(...) slow in sample_hemisphere and world() slow. # seems fine now? i think splitting sample_hemisphere into sample_sphere has helpled.
 const Spectrum = SVector{3, T}
 
 @with_kw struct Ray @deftype Point
@@ -77,6 +77,9 @@ imagesize(height, aspectRatio) = round.(Int, (height, height / aspectRatio))
     end
 end
 pixelWorldPosition(camera, index) = camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down
+
+# using MuladdMacro
+# @inbounds @inline @muladd StaticArrays.dot(v0::Point, v1::Point) = v0.x * v1.x + v0.y * v1.y + v0.z * v1.z
 
 norm2(x) = x ⋅ x
 
@@ -202,7 +205,7 @@ function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
         return world(ray)
     else
         position = ray(t)
-        direction, colour = record(position, ray) 
+        direction, colour = record(position, ray) # scatter right now only depends on ray direction so we don't need to advance it?
 
         ray = Ray(position, direction)
         return rayColour(ray, hittable_list, depth - 1) .* colour
@@ -295,10 +298,23 @@ function profile()
     PProf.Allocs.pprof(from_c=false, webport=8080)
 end
 
+function profview(;print=false, parallel=true)
+    HittableList = scene_random_spheres();
+    scene = Scene(Tuple(HittableList));
+    spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
+    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    @profview render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
+    rgb_img = map(x -> RGB(x...), spectrum_img)
+    if print
+        rgb_img |> display
+    end
+    return rgb_img
+end
+
 using BenchmarkTools
 function benchmark(;print=false, parallel=true)
     HittableList = scene_random_spheres();
-    scene = Scene(HittableList);
+    scene = Scene(Tuple(HittableList));
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=10, parallel=$parallel))

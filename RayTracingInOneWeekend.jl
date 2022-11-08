@@ -1,3 +1,5 @@
+# This tries to stay faithful to the book's code
+
 using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers
 import FunctionWrappers: FunctionWrapper
 
@@ -13,13 +15,16 @@ const Spectrum = SVector{3, T}
 end
 (ray::Ray)(t) = ray.origin + t * ray.direction
 
-struct HitRecord
-    colour::Spectrum
+struct Material
+    attenuation::Spectrum
     scatter::FunctionWrapper{Point, Tuple{Ray, Point}}
-    normal::FunctionWrapper{Point, Tuple{Point}}
 end
-function (h::HitRecord)(position, ray)::Tuple{Point, Spectrum}
-    return (h.scatter(ray, h.normal(position)), h.colour)
+
+struct hit_record
+    p::Point
+    normal::Point
+    material::Material
+    t::T
 end
 
 abstract type Primitive end
@@ -27,11 +32,14 @@ abstract type Primitive end
 @with_kw struct Sphere <: Primitive
     centre::Point
     radius::T
-    record::HitRecord
-    Sphere(centre=zeros(Point), radius=1//2, colour=ones(Spectrum), scatter=lambertian) = new(centre, radius, HitRecord(colour, scatter, (position) -> (position - centre) / radius))
+    material::Material
+
+    Sphere(centre=zeros(Point), radius=1//2, attenuation=ones(Spectrum), scatter=lambertian) = new(centre, radius, Material(attenuation, scatter))
 end
 
-@with_kw struct Scene{T}
+sphere_normal(sphere, position) = (position - sphere.centre) / sphere.radius
+
+@with_kw struct hittable_list{T}
     Sphere::T = []
 end
 
@@ -45,37 +53,37 @@ imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
 	pinhole_location
 
     lens_radius::T
-
-    function Camera(nx=400, ny=imagesize(nx, 16/9)[2], camera_height=2, camera_centre=Point(0, 1, 0), lens_radius::T=0, focus_distance=1) where T
-        aspect_ratio = nx/ny
-
-        camera_height *= focus_distance
-        right = Point(camera_height * aspect_ratio, 0, 0) / nx
-        down = - Point(0, 0, camera_height) / ny
-        upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
-        pinhole_location = camera_centre - Point(0, focus_distance, 0)
-    
-        return new{T}(right, down, upper_left_corner, pinhole_location, lens_radius)
-    end
-    function Camera(nx=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Point(0, 0, 0), lookat=Point(0, 1, 0), up=Point(0, 0, 1), vfov=2atand(1), lens_radius::T=0, focus_distance=1) where T
-        aspect_ratio = nx/ny
-
-        camera_height = 2 * tand(vfov / 2) * focus_distance
-        camera_width = camera_height * aspect_ratio
-
-        w = normalize(lookat - pinhole_location)
-        u = normalize(w × up)
-        v = w × u
-
-        right = u * camera_width / nx 
-        down = v * camera_height / ny
-
-        camera_centre = pinhole_location + w * focus_distance
-        upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
-
-        return new{T}(right, down, upper_left_corner, pinhole_location, lens_radius)
-    end
 end
+function Camera(nx=400, ny=imagesize(nx, 16/9)[2], camera_height=2, camera_centre=Point(0, 1, 0), lens_radius=0, focus_distance=1)
+    aspect_ratio = nx/ny
+
+    camera_height *= focus_distance
+    right = Point(camera_height * aspect_ratio, 0, 0) / nx
+    down = - Point(0, 0, camera_height) / ny
+    upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
+    pinhole_location = camera_centre - Point(0, focus_distance, 0)
+
+    return Camera{T}(right, down, upper_left_corner, pinhole_location, lens_radius)
+end
+function Camera(nx=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Point(0, 0, 0), lookat=Point(0, 1, 0), up=Point(0, 0, 1), vfov=2atand(1), lens_radius=0, focus_distance=1)
+    aspect_ratio = nx/ny
+
+    camera_height = 2 * tand(vfov / 2) * focus_distance
+    camera_width = camera_height * aspect_ratio
+
+    w = normalize(lookat - pinhole_location)
+    u = normalize(w × up)
+    v = w × u
+
+    right = u * camera_width / nx 
+    down = v * camera_height / ny
+
+    camera_centre = pinhole_location + w * focus_distance
+    upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
+
+    return Camera(right, down, upper_left_corner, pinhole_location, lens_radius)
+end
+
 pixelWorldPosition(camera, index) = camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down
 
 norm2(x) = x ⋅ x
@@ -102,7 +110,7 @@ norm2(x) = x ⋅ x
     end
 end
 
-function world(ray)
+function world_color(ray)
     interp = (ray.direction.z + 1) / 2
     return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0) # Spectrum{3, Float64} instead of Spectrum{3, T} saves 1mb, 0.2s for nx=50. 
 end
@@ -173,37 +181,39 @@ end
 glass(ior=3//2) = (ray, n⃗) -> glass(ray, n⃗, ior)
 metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
 
-const initialRecord = Sphere().record
+const initialRecord = hit_record(zeros(Point), normalize(ones(Point)), Sphere().material, Inf)
 
-function findSceneIntersection(ray, hittable_list, tmin, tmax)
+function findSceneIntersection(r, hittable_list, tmin, tmax)
     record = initialRecord
-    
+    closest_so_far = tmax
+
     for i in eachindex(hittable_list.Sphere)
-        t = intersect(ray, hittable_list.Sphere[i], tmin, tmax)
-        if t > 0 # we know t ≤ tmax as t is the result of intersect
-            tmax = t
-            record = hittable_list.Sphere[i].record
+        t = intersect(r, hittable_list.Sphere[i], tmin, closest_so_far)
+        if t > 0 # we know t ≤ closest_so_far  as t is the result of intersect
+            closest_so_far  = t
+            record = hit_record(r(t), sphere_normal(hittable_list.Sphere[i], r(t)), hittable_list.Sphere[i].material, t)
         end
     end
 
-    return (tmax, record)
+    return record
 end
 
-function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
+function ray_color(r, world, depth, tmin=1e-4, tmax=Inf)::Spectrum
     if depth == 0
         return zeros(Spectrum)
     end
 
-    t, record = findSceneIntersection(ray, hittable_list, tmin, tmax)
+    record = findSceneIntersection(r, world, tmin, tmax)
 
-    if t == tmax # nothing hit
-        return world(ray)
+    if record.t == Inf # nothing hit, t from initialRecord
+        return world_color(r)
     else
-        position = ray(t)
-        direction, colour = record(position, ray) 
+        # @assert norm(record.normal) ≈ 1
+        direction = record.material.scatter(r, record.normal)
+        attenuation = record.material.attenuation
 
-        ray = Ray(position, direction)
-        return rayColour(ray, hittable_list, depth - 1) .* colour
+        scattered = Ray(record.p, direction)
+        return ray_color(scattered, world, depth - 1) .* attenuation
     end
 end
 
@@ -247,7 +257,7 @@ function renderRay(HittableList, maxDepth, pixel_position, camera)
 
     ray = Ray(camera.pinhole_location + defocus_offset, normalize(random_pixel_position - camera.pinhole_location - defocus_offset))
 
-    return rayColour(ray, HittableList, maxDepth)
+    return ray_color(ray, HittableList, maxDepth)
 end
 
 function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=true)
@@ -261,13 +271,13 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
 end
     
 # @code_warntype rendexPixel(scene_random_spheres(), 10, Point(0, 0, 1), Camera());
-# @code_warntype rayColour(Ray(), scene_random_spheres(), 10, 1e-4, Inf);
+# @code_warntype ray_color(Ray(), scene_random_spheres(), 10, 1e-4, Inf);
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
 
 function run(print=false)
     HittableList = scene_random_spheres();
-    scene = Scene(HittableList);
+    scene = hittable_list(HittableList);
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     @profview render!(spectrum_img, scene, camera, samples_per_pixel=10)
@@ -278,10 +288,23 @@ function run(print=false)
     return rgb_img
 end
 
+function test(print=false)
+    scene = scene_random_spheres();
+    HittableList = hittable_list(scene);
+    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/10, 16//9))...)
+    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    render!(spectrum_img, HittableList, camera, samples_per_pixel=5)
+    rgb_img = map(x -> RGB(x...), spectrum_img)
+    if print
+        rgb_img |> display
+    end
+    return rgb_img
+end
+
 using Profile, PProf
 function profile()
     HittableList = scene_random_spheres();
-    scene = Scene(HittableList);
+    scene = hittable_list(HittableList);
     spectrum_img = zeros(Spectrum, reverse(imagesize(10, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     render!(spectrum_img, scene, camera, samples_per_pixel=10)
@@ -296,7 +319,7 @@ end
 using BenchmarkTools
 function benchmark(;print=false, parallel=true)
     HittableList = scene_random_spheres();
-    scene = Scene(HittableList);
+    scene = hittable_list(HittableList);
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=10, parallel=$parallel))
