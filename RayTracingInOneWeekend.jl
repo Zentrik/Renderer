@@ -275,6 +275,19 @@ end
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
 
+function claforte(print=false)
+    HittableList = scene_random_spheres();
+    scene = hittable_list(HittableList);
+    spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
+    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=1000)
+    rgb_img = map(x -> RGB(x...), spectrum_img)
+    if print
+        rgb_img |> display
+    end
+    return rgb_img
+end
+
 function run(print=false)
     HittableList = scene_random_spheres();
     scene = hittable_list(HittableList);
