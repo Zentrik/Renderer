@@ -250,7 +250,7 @@ function scene_random_spheres()
 end
 
 function renderRay(HittableList, maxDepth, pixel_position, camera)
-    random_pixel_position = pixel_position + rand() * camera.right + rand() * camera.down # Is this correct when multithreaded?
+    random_pixel_position = pixel_position + rand() * camera.right + rand() * camera.down
 
     defocus_random = camera.lens_radius * sample_circle()
     defocus_offset = defocus_random[1] * normalize(camera.right) + defocus_random[2] * normalize(camera.down)
