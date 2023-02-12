@@ -4,3 +4,4 @@ GammaTesting.jl
 *.pb.gz
 
 in_one_weekend/target
+.vscode/

@@ -183,11 +183,11 @@ const initialRecord = Sphere().record
 function findSceneIntersection(ray, hittable_list, tmin, tmax)
     record = initialRecord
     
-    for i in eachindex(hittable_list.Sphere)
-        t = intersect(ray, hittable_list.Sphere[i], tmin, tmax)
+    for sphere in hittable_list.Sphere
+        t = intersect(ray, sphere, tmin, tmax)
         if t > 0 # we know t ≤ tmax as t is the result of intersect
             tmax = t
-            record = hittable_list.Sphere[i].record
+            record = sphere.record
         end
     end
 
@@ -283,6 +283,7 @@ function run(;print=false, parallel=true)
     return rgb_img
 end
 
+HittableList = scene_random_spheres();
 using Profile, PProf
 function profile()
     HittableList = scene_random_spheres();
