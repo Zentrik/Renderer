@@ -141,7 +141,7 @@ end
 
 function shick(cosθ, ior_ratio)
     r0 = ((1 - ior_ratio) / (1 + ior_ratio))^2
-    return r0 = (1 - r0) * (1 - cosθ)^5
+    return r0 + (1 - r0) * (1 - cosθ)^5
 end
 
 function glass(ray, n⃗, ior)
