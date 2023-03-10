@@ -54,17 +54,6 @@ imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
 
     lens_radius::T
 end
-function Camera(nx=400, ny=imagesize(nx, 16/9)[2], camera_height=2, camera_centre=Point(0, 1, 0), lens_radius=0, focus_distance=1)
-    aspect_ratio = nx/ny
-
-    camera_height *= focus_distance
-    right = Point(camera_height * aspect_ratio, 0, 0) / nx
-    down = - Point(0, 0, camera_height) / ny
-    upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
-    pinhole_location = camera_centre - Point(0, focus_distance, 0)
-
-    return Camera{T}(right, down, upper_left_corner, pinhole_location, lens_radius)
-end
 function Camera(nx=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Point(0, 0, 0), lookat=Point(0, 1, 0), up=Point(0, 0, 1), vfov=2atand(1), lens_radius=0, focus_distance=1)
     aspect_ratio = nx/ny
 
@@ -115,15 +104,19 @@ function world_color(ray)
     return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0) # Spectrum{3, Float64} instead of Spectrum{3, T} saves 1mb, 0.2s for nx=50. 
 end
 
-function sample_circle()
-    θ = 2π * rand()
-    return SA[cos(θ), sin(θ)]
+function random_in_unit_disk()
+    while true
+        p = rand(2) * 2 .- 1
+        if norm2(p) < 1
+            return p
+        end
+    end
 end
 
 function random_in_unit_sphere()
     while true
         sample = rand(Point) * 2 .- 1
-        if norm2(sample) ≤ 1
+        if norm2(sample) < 1
             return sample
         end
     end
@@ -252,7 +245,7 @@ end
 function renderRay(HittableList, maxDepth, pixel_position, camera)
     random_pixel_position = pixel_position + rand() * camera.right + rand() * camera.down
 
-    defocus_random = camera.lens_radius * sample_circle()
+    defocus_random = camera.lens_radius * random_in_unit_disk()
     defocus_offset = defocus_random[1] * normalize(camera.right) + defocus_random[2] * normalize(camera.down)
 
     ray = Ray(camera.pinhole_location + defocus_offset, normalize(random_pixel_position - camera.pinhole_location - defocus_offset))
