@@ -5,3 +5,7 @@ GammaTesting.jl
 
 in_one_weekend/target
 .vscode/
+
+c++/x64
+c++/.vs
+c++/VTune*
