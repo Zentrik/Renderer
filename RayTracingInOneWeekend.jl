@@ -129,7 +129,8 @@ function reflect(ray, n⃗, fuzz=0)
         direction += fuzz * random_in_unit_sphere()
     end
 
-    return normalize(direction)
+    # This does not absorb if direction is into the object !!!!
+    # maybe return zeros(Point) if into and then if in ray_color?
 end
 
 function shick(cosθ, ior_ratio)
@@ -268,13 +269,15 @@ end
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
 
+spectrumToRGB(spectrum_img) = map(x -> RGB((x.^.5)...), spectrum_img)
+
 function claforte(print=false)
     HittableList = scene_random_spheres();
     scene = hittable_list(HittableList);
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     @time render!(spectrum_img, scene, camera, samples_per_pixel=1000)
-    rgb_img = map(x -> RGB(x...), spectrum_img)
+    rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
     end
@@ -287,7 +290,7 @@ function run(print=false)
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     @profview render!(spectrum_img, scene, camera, samples_per_pixel=10)
-    rgb_img = map(x -> RGB(x...), spectrum_img)
+    rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
     end
@@ -300,7 +303,7 @@ function test(print=false)
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920/10, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     render!(spectrum_img, HittableList, camera, samples_per_pixel=5)
-    rgb_img = map(x -> RGB(x...), spectrum_img)
+    rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
     end
@@ -329,7 +332,7 @@ function benchmark(;print=false, parallel=true)
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
     display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=10, parallel=$parallel))
-    rgb_img = map(x -> RGB(x...), spectrum_img)
+    rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
     end
