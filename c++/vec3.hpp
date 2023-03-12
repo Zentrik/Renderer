@@ -76,30 +76,32 @@ class vec3{
 using point3 = vec3;   // 3D point
 using colour = vec3;    // RGB colour
 
-// inline vec3 operator +(const vec3 &v, const vec3 &o) {
-//     return vec3(v[0] + o[0], v[1] + o[1], v[2] + o[2]);
-// }
+inline vec3 operator +(const vec3 &v, const vec3 &o) {
+     return vec3(v[0] + o[0], v[1] + o[1], v[2] + o[2]);
+}
 
-// inline vec3 operator -(const vec3 &v, const vec3 &o) {
-//     return v + -o;
-// }
+inline vec3 operator -(const vec3 &v, const vec3 &o) {
+     return vec3(v[0] - o[0], v[1] - o[1], v[2] - o[2]);
+}
 
-// inline vec3 operator *(double t, const vec3 &v) {
-//     return vec3(t * v[0], t * v[1], t * v[2]);
-// }
+inline vec3 operator *(double t, const vec3 &v) {
+    return vec3(t * v[0], t * v[1], t * v[2]);
+}
 
-
-inline vec3 operator +(vec3 v, const vec3 &o) {
+/*
+inline vec3 operator +(const vec3& v, const vec3 &o) {
     return v += o;
 }
 
-inline vec3 operator -(vec3 v, const vec3 &o) {
-    return v -= o;
+inline vec3 operator -(const vec3& v, const vec3 &o) {
+    v -= o;
+    //return vec3(v[0] - o[0], v[1] - o[1], v[2] - o[2]);
 }
 
 inline vec3 operator *(double t, vec3 v) {
     return v *= t;
 }
+*/
 
 inline vec3 operator *(const vec3& v, const vec3& o) {
     return vec3(v[0] * o[0], v[1] * o[1], v[2] * o[2]);
