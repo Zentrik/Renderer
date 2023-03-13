@@ -20,7 +20,8 @@ using std::sqrt;
 
 // Constants
 
-constexpr const double infinity = std::numeric_limits<double>::infinity();
+// constexpr const double infinity = std::numeric_limits<double>::infinity();
+constexpr const double infinity = std::numeric_limits<double>::max(); // idk how well infinity plays with fast math
 constexpr const double pi = 3.1415926535897932385;
 
 // Utility Functions
