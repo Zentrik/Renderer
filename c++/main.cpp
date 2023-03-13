@@ -9,7 +9,6 @@
 #include "camera.hpp"
 #include "material.hpp"
 
-
 colour world_colour(const ray& r) {
     vec3 unit_direction = normalised(r.direction());
     auto t = 0.5 * (unit_direction.y() + 1.);
@@ -165,10 +164,10 @@ int main() {
 
     // IMAGE
 
-#if 0
-    const auto aspect_ratio = 3. / 2.;
+#if 1
+    constexpr const auto aspect_ratio = 3. / 2.;
     const int image_width = 400;
-    const int image_height = static_cast<int>(image_width / aspect_ratio);
+    constexpr const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 5;
     const int max_depth = 5;
 #else
@@ -201,9 +200,12 @@ int main() {
 
     std::vector<std::vector<colour>> pixel(image_height, std::vector<colour>(image_width, colour(0, 0, 0)));
 
+    // This is pretty big for the stack, I doubt there's any performance improvement also
+    // static colour pixel[image_height][image_width]; // vec3() is zeros so no need to initialise
+    
     clock_t start_time = clock();
 
-    #pragma omp parallel for num_threads(16) schedule(dynamic, 1)
+    // #pragma omp parallel for num_threads(1) schedule(dynamic, 1)
     for (int j = image_height-1; j >= 0; --j) {
         std::cout << "\rScanlines remaining: " << j << " " << std::flush;
         for (int i = 0; i < image_width; ++i) {

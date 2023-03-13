@@ -8,6 +8,7 @@ double random_double(double min, double max);
 
 using std::sqrt;
 
+#if 0
 class vec3{
     public:
         double v[3];
@@ -71,6 +72,108 @@ class vec3{
             return (fabs(v[0]) < absolute_tolerance) && (fabs(v[1]) < absolute_tolerance) && (fabs(v[2]) < absolute_tolerance);
         }
 };
+#else
+class vec3{
+    public:
+#if 0
+        double v[3];
+
+        vec3() : v{ 0, 0, 0 } {}
+        vec3(double v0, double v1, double v2) : v{ v0, v1, v2 } {}
+
+        inline double x() const { return v[0]; }
+        inline double y() const { return v[1]; }
+        inline double z() const { return v[2]; }
+
+        double operator [](int i) const { return v[i]; }
+        double& operator [](int i) { return v[i]; }
+#else
+        double a, b, c;
+
+        constexpr vec3(): a(0), b(0), c(0) {}
+        constexpr vec3(double v0, double v1, double v2): a(v0), b(v1), c(v2) {}
+
+        inline double x() const { return a; }
+        inline double y() const { return b; }
+        inline double z() const { return c; }
+
+        double operator [](int i) const {
+            switch (i) {
+                case 0:
+                    return a;
+                case 1:
+                    return b;
+                case 2:
+                    return c;
+                default:
+                    std::cerr << "Cannot index into vec3 with " << i << "\n";
+                    throw (i);
+            }
+        }
+        double& operator [](int i) {
+            switch (i) {
+                case 0:
+                    return a;
+                case 1:
+                    return b;
+                case 2:
+                    return c;
+                default:
+                    std::cerr << "Cannot index into vec3 with " << i << "\n";
+                    throw (i);
+            }
+        }
+#endif
+        inline vec3& operator +=(const vec3& o) {
+            (*this)[0] += o[0];
+            (*this)[1] += o[1];
+            (*this)[2] += o[2];
+
+            return *this;
+        }
+
+        inline vec3& operator -=(const vec3& o) {
+            (*this)[0] -= o[0];
+            (*this)[1] -= o[1];
+            (*this)[2] -= o[2];
+
+            return *this;
+        }
+
+        inline vec3& operator *=(const double t) {
+            (*this)[0] *= t;
+            (*this)[1] *= t;
+            (*this)[2] *= t;
+
+            return *this;
+        }
+
+        inline vec3& operator /=(const double t) {
+            return *this *= 1 / t;
+        }
+
+        inline vec3& operator *=(const vec3& o) {
+            (*this)[0] *= o[0];
+            (*this)[1] *= o[1];
+            (*this)[2] *= o[2];
+
+            return *this;
+        }
+
+        inline static vec3 random() {
+            return vec3(random_double(), random_double(), random_double());
+        }
+
+        inline static vec3 random(double min, double max) {
+            return vec3(random_double(min, max), random_double(min, max), random_double(min, max));
+        }
+
+        inline bool approx_zero() const {
+            const auto absolute_tolerance = 1e-8;
+            return (fabs((*this)[0]) < absolute_tolerance) && (fabs((*this)[1]) < absolute_tolerance) && (fabs((*this)[2]) < absolute_tolerance);
+        }
+};
+#endif
 
 // Type aliases for vec3
 using point3 = vec3;   // 3D point

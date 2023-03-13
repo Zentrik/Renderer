@@ -1,0 +1,6 @@
+{
+    "files.associations": {
+        "*.Rmd": "latex-expl3",
+        "memory": "cpp"
+    }
+}
