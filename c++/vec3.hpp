@@ -93,11 +93,11 @@ class vec3{
         constexpr vec3(): a(0), b(0), c(0) {}
         constexpr vec3(double v0, double v1, double v2): a(v0), b(v1), c(v2) {}
 
-        inline double x() const { return a; }
-        inline double y() const { return b; }
-        inline double z() const { return c; }
+        constexpr inline double x() const { return a; }
+        constexpr inline double y() const { return b; }
+        constexpr inline double z() const { return c; }
 
-        double operator [](int i) const {
+        constexpr inline double operator [](int i) const {
             switch (i) {
                 case 0:
                     return a;
@@ -110,7 +110,8 @@ class vec3{
                     throw (i);
             }
         }
-        double& operator [](int i) {
+
+        constexpr inline double& operator [](int i) {
             switch (i) {
                 case 0:
                     return a;

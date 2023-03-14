@@ -3,6 +3,46 @@
 #include "hittable.hpp"
 #include "vec3.hpp"
     
+#if 0
+
+#define kSimdWidth 4
+
+// data for all spheres in a "structure of arrays" layout
+struct SpheresSoA
+{
+    SpheresSoA(int c)
+    {
+        count = c;
+        // we'll be processing spheres in kSimdWidth chunks, so make sure to allocate enough spaceG
+        simdCount = (c + (kSimdWidth - 1)) / kSimdWidth * kSimdWidth;
+        centerX = new float[simdCount];
+        centerY = new float[simdCount];
+        centerZ = new float[simdCount];
+        radius = new float[simdCount];
+
+        // set all data to "impossible sphere" state
+        for (int i = count; i < simdCount; ++i)
+        {
+            centerX[i] = centerY[i] = centerZ[i] = 10000.0f;
+            radius[i] = 0.0f;
+        }
+    }
+    ~SpheresSoA()
+    {
+        delete[] centerX;
+        delete[] centerY;
+        delete[] centerZ;
+        delete[] radius;
+    }
+    float* centerX;
+    float* centerY;
+    float* centerZ;
+    float* radius;
+
+    int simdCount;
+    int count;
+};
+#else
 #ifdef NOVIRTUAL
 class sphere {
     public:
@@ -117,4 +157,4 @@ class sphere: public hittable {
         }
 };
 #endif
-
+#endif

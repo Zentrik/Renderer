@@ -2,6 +2,14 @@
 #define NOSHAREDPTR
 #define NOTEMP_REC
 
+// #define SOA
+// #define AOSOA
+#define SIMD
+
+// #define OMPSIMD
+// #define BRANCHLESS
+#define DontCalculateNormalsEveryHit
+
 #include "header.hpp"
 #include "colour.hpp"
 #include "hittable_list.hpp"
@@ -116,7 +124,7 @@ hittable_list random_scene() {
     hittable_list world;
 
     auto ground_material = make_shared<lambertian>(colour(0.5, 0.5, 0.5));
-    world.add(make_shared<sphere> (point3(0,-1000,0), 1000, ground_material));
+    world.add(make_shared<sphere>(point3(0,-1000,0), 1000, ground_material));
 
     for (int a = -11; a < 11; a++) {
         for (int b = -11; b < 11; b++) {
@@ -203,11 +211,12 @@ int main() {
     // This is pretty big for the stack, I doubt there's any performance improvement also
     // static colour pixel[image_height][image_width]; // vec3() is zeros so no need to initialise
     
-    clock_t start_time = clock();
+    // clock_t start_time = clock();
+    time_point<Clock> start_time = Clock::now();
 
-    // #pragma omp parallel for num_threads(1) schedule(dynamic, 1)
+    // #pragma omp parallel for num_threads(16) schedule(dynamic, 1)
     for (int j = image_height-1; j >= 0; --j) {
-        std::cout << "\rScanlines remaining: " << j << " " << std::flush;
+        // std::cout << "\rScanlines remaining: " << j << " " << std::flush;
         for (int i = 0; i < image_width; ++i) {
             colour& pixel_colour = pixel[j][i];
 
@@ -228,6 +237,11 @@ int main() {
         }
     }
 
-    std::cout << "\nDone in " << clock() - start_time << " milliseconds\n";
+    // std::cout << "\nDone in " << duration_cast<milliseconds>(Clock::now() - start_time).count() << " milliseconds\n";
+
+#ifdef _WIN32
     Sleep(1000);
+#else
+    // sleep(1);
+#endif
 }
