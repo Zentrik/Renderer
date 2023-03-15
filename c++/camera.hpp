@@ -39,8 +39,8 @@ class camera {
         }
 
 
-        ray get_ray(float s, float t) const {
-            vec3 rd = lens_radius * uniform_random_in_unit_disk();
+        ray get_ray(float s, float t, random_series &Series) const {
+            vec3 rd = lens_radius * uniform_random_in_unit_disk(Series);
             vec3 offset = u * rd.x() + v * rd.y();
 
             return ray(

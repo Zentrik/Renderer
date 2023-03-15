@@ -6,7 +6,7 @@ struct hit_record;
 
 class material {
     public:
-        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered) const = 0;
+        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered, random_series &Series) const = 0;
 };
 
 class lambertian: public material {
@@ -15,8 +15,8 @@ class lambertian: public material {
 
         lambertian(const colour& a) : albedo(a) {}
 
-        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered) const override {
-            vec3 scatter_direction = rec.normal + uniform_random_unit_vector();
+        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered, random_series &Series) const override {
+            vec3 scatter_direction = rec.normal + uniform_random_unit_vector(Series);
 
             if (scatter_direction.approx_zero()) {
                 scatter_direction = rec.normal;
@@ -39,9 +39,9 @@ class metal: public material {
 
         metal(const colour& a, float fuzz) : albedo(a), fuzz(fuzz < 1 ? fuzz : 1) {}
 
-        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered) const override {
+        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered, random_series &Series) const override {
             vec3 reflected = reflect(normalised(r_in.direction()), rec.normal);
-            scattered = ray(rec.p, reflected + fuzz * uniform_random_in_unit_sphere());
+            scattered = ray(rec.p, reflected + fuzz * uniform_random_in_unit_sphere(Series));
             attenuation = albedo;
 
             return dot(scattered.direction(), rec.normal) > 0;
@@ -67,7 +67,7 @@ class dielectric : public material {
 
         dielectric(float index_of_refraction) : ior(index_of_refraction) {}
 
-        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered) const override {
+        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered, random_series &Series) const override {
             attenuation = colour(1.0, 1.0, 1.0);
 
             float air_ior = 1.0;
@@ -91,7 +91,7 @@ class dielectric : public material {
             bool cannot_refract = ior_ratio * sinTheta > 1.0;
             vec3 direction;
 
-            if (cannot_refract || random_float() < schlick(cosTheta, ior_ratio)) {
+            if (cannot_refract || random_float(Series) < schlick(cosTheta, ior_ratio)) {
                 direction = reflect(unit_direction, rec.normal * sign);
                 // direction = refract(unit_direction, rec.normal * sign, cosTheta, ior_ratio);
             } else {

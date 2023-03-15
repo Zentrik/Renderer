@@ -40,20 +40,33 @@ constexpr inline float degrees_to_radians(float degrees) {
     return degrees * pi / 180.0;
 }
 
-inline float random_float() {
-    // Returns a random real in [0,1).
-    static thread_local std::mt19937 generator;
-    // generator.seed(45218965);
-    std::uniform_real_distribution<float> distribution(0., 1.);
-    return distribution(generator);
+struct random_series {
+    uint32_t State;
+};
+
+uint32_t XOrShift32(random_series &Series) {
+    uint32_t x = Series.State;
+
+    x ^= x << 13;
+    x ^= x >> 17;
+    x ^= x << 5;
+
+    Series.State = x;
+    return x;
 }
 
-inline float random_float(float min, float max) {
+inline float random_float(random_series &Series) {
+    // Returns a random real in [0,1).
+    float result = (float) XOrShift32(Series) / (float) ((uint32_t) - 1);
+    return result;
+}
+
+inline float random_float(random_series &Series, float min, float max) {
     // Returns a random real in [min,max).
     // static thread_local std::mt19937 generator;
     // std::uniform_real_distribution<float> distribution(min, max);
     // return distribution(generator);
-    return min + (max-min)*random_float();
+    return min + (max-min)*random_float(Series);
 }
 
 inline float clamp(float x, float min, float max) {

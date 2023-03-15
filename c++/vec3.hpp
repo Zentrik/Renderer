@@ -3,8 +3,8 @@
 #include <cmath>
 #include <iostream>
 
-float random_float();
-float random_float(float min, float max);
+float random_float(random_series &Series);
+float random_float(random_series &Series, float min, float max);
 
 using std::sqrt;
 
@@ -161,12 +161,12 @@ class vec3{
             return *this;
         }
 
-        inline static vec3 random() {
-            return vec3(random_float(), random_float(), random_float());
+        inline static vec3 random(random_series &Series) {
+            return vec3(random_float(Series), random_float(Series), random_float(Series));
         }
 
-        inline static vec3 random(float min, float max) {
-            return vec3(random_float(min, max), random_float(min, max), random_float(min, max));
+        inline static vec3 random(random_series &Series, float min, float max) {
+            return vec3(random_float(Series, min, max), random_float(Series, min, max), random_float(Series, min, max));
         }
 
         inline bool approx_zero() const {
@@ -245,20 +245,20 @@ inline vec3 normalised(vec3 v) {
     return normalise(v);
 }
 
-vec3 uniform_random_in_unit_sphere() {
+vec3 uniform_random_in_unit_sphere(random_series &Series) {
     while (true) {
-        vec3 p = vec3::random(-1, 1);
+        vec3 p = vec3::random(Series, -1, 1);
         if (length_squared(p) < 1) return p;
     }
 }
 
-vec3 uniform_random_unit_vector() {
-    return normalised(uniform_random_in_unit_sphere());
+vec3 uniform_random_unit_vector(random_series &Series) {
+    return normalised(uniform_random_in_unit_sphere(Series));
 }
 
-vec3 uniform_random_in_unit_disk() {
+vec3 uniform_random_in_unit_disk(random_series &Series) {
     while (true) {
-        vec3 p(random_float(-1, 1), random_float(-1, 1), 0);
+        vec3 p(random_float(Series, -1, 1), random_float(Series, -1, 1), 0);
         if (length_squared(p) < 1) return p;
     }
 }
