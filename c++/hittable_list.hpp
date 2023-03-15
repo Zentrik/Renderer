@@ -64,24 +64,24 @@ public:
         mat_ptr.clear();
     }
 
-    virtual bool hit(const ray &r, double t_min, double t_max, hit_record &rec) const
+    virtual bool hit(const ray &r, float t_min, float t_max, hit_record &rec) const
     {
         bool hit_anything = false;
 #if _MSC_VER // For some reason speeds up msvc
         hit_record temp_rec;
         rec = temp_rec;
 #endif
-        Vec8f hitT((float)t_max);
+        Vec8f hitT(t_max);
         Vec8ui id;
 
-        Vec8f rOrigX((float)r.origin().x());
-        Vec8f rOrigY((float)r.origin().y());
-        Vec8f rOrigZ((float)r.origin().z());
-        Vec8f rDirX((float)r.direction().x());
-        Vec8f rDirY((float)r.direction().y());
-        Vec8f rDirZ((float)r.direction().z());
+        Vec8f rOrigX(r.origin().x());
+        Vec8f rOrigY(r.origin().y());
+        Vec8f rOrigZ(r.origin().z());
+        Vec8f rDirX(r.direction().x());
+        Vec8f rDirY(r.direction().y());
+        Vec8f rDirZ(r.direction().z());
 
-        Vec8f tMinVec((float)t_min);
+        Vec8f tMinVec(t_min);
         Vec8ui curId(0, 1, 2, 3, 4, 5, 6, 7);
 
         for (int i = 0; i < radius.size(); i++)
@@ -98,7 +98,7 @@ public:
 
             #if 1
             // if ray hits any of the 4 spheres
-            if (horizontal_or(isDiscriminantPositive)) // Branching gives 2x speedup
+            if (horizontal_or(isDiscriminantPositive)) // Branching gives 2x speedup using sse (i.e. Vec4f but with Aras' code)
             {
                 Vec8f quarter_discriminant_root = sqrt(quarter_discriminant);
 
@@ -163,7 +163,7 @@ public:
                 int i = hitId / Vec8f::size();
                 int j = lane;
 
-                rec.t = (double)finalHitT;
+                rec.t = finalHitT;
                 rec.p = r.at(rec.t);
                 rec.normal = (rec.p - vec3(centreX[i][j], centreY[i][j], centreZ[i][j])) / radius[i][j];
                 rec.mat_ptr = mat_ptr[hitId];

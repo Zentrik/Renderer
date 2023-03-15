@@ -3,25 +3,25 @@
 #include <cmath>
 #include <iostream>
 
-double random_double();
-double random_double(double min, double max);
+float random_float();
+float random_float(float min, float max);
 
 using std::sqrt;
 
 #if 0
 class vec3{
     public:
-        double v[3];
+        float v[3];
 
         vec3(): v{0, 0, 0} {}
-        vec3(double v0, double v1, double v2): v{v0, v1, v2} {}
+        vec3(float v0, float v1, float v2): v{v0, v1, v2} {}
 
-        inline double x() const {return v[0];}
-        inline double y() const {return v[1];}
-        inline double z() const {return v[2];}
+        inline float x() const {return v[0];}
+        inline float y() const {return v[1];}
+        inline float z() const {return v[2];}
 
-        double operator [](int i) const {return v[i];}
-        double& operator [](int i) {return v[i];}
+        float operator [](int i) const {return v[i];}
+        float& operator [](int i) {return v[i];}
 
         inline vec3& operator +=(const vec3& o) {
             v[0] += o[0];
@@ -39,7 +39,7 @@ class vec3{
             return *this;
         }
 
-        inline vec3& operator *=(const double t) {
+        inline vec3& operator *=(const float t) {
             v[0] *= t;
             v[1] *= t;
             v[2] *= t;
@@ -47,7 +47,7 @@ class vec3{
             return *this;
         }
 
-        inline vec3& operator /=(const double t) {
+        inline vec3& operator /=(const float t) {
             return *this *= 1/t;
         }
 
@@ -60,11 +60,11 @@ class vec3{
         }
 
         inline static vec3 random() {
-            return vec3(random_double(), random_double(), random_double());
+            return vec3(random_float(), random_float(), random_float());
         }
 
-        inline static vec3 random(double min, double max) {
-            return vec3(random_double(min, max), random_double(min, max), random_double(min, max));
+        inline static vec3 random(float min, float max) {
+            return vec3(random_float(min, max), random_float(min, max), random_float(min, max));
         }
 
         inline bool approx_zero() const {
@@ -76,28 +76,28 @@ class vec3{
 class vec3{
     public:
 #if 0
-        double v[3];
+        float v[3];
 
         vec3() : v{ 0, 0, 0 } {}
-        vec3(double v0, double v1, double v2) : v{ v0, v1, v2 } {}
+        vec3(float v0, float v1, float v2) : v{ v0, v1, v2 } {}
 
-        inline double x() const { return v[0]; }
-        inline double y() const { return v[1]; }
-        inline double z() const { return v[2]; }
+        inline float x() const { return v[0]; }
+        inline float y() const { return v[1]; }
+        inline float z() const { return v[2]; }
 
-        double operator [](int i) const { return v[i]; }
-        double& operator [](int i) { return v[i]; }
+        float operator [](int i) const { return v[i]; }
+        float& operator [](int i) { return v[i]; }
 #else
-        double a, b, c;
+        float a, b, c;
 
         constexpr vec3(): a(0), b(0), c(0) {}
-        constexpr vec3(double v0, double v1, double v2): a(v0), b(v1), c(v2) {}
+        constexpr vec3(float v0, float v1, float v2): a(v0), b(v1), c(v2) {}
 
-        constexpr inline double x() const { return a; }
-        constexpr inline double y() const { return b; }
-        constexpr inline double z() const { return c; }
+        constexpr inline float x() const { return a; }
+        constexpr inline float y() const { return b; }
+        constexpr inline float z() const { return c; }
 
-        constexpr inline double operator [](int i) const {
+        constexpr inline float operator [](int i) const {
             switch (i) {
                 case 0:
                     return a;
@@ -111,7 +111,7 @@ class vec3{
             }
         }
 
-        constexpr inline double& operator [](int i) {
+        constexpr inline float& operator [](int i) {
             switch (i) {
                 case 0:
                     return a;
@@ -141,7 +141,7 @@ class vec3{
             return *this;
         }
 
-        inline vec3& operator *=(const double t) {
+        inline vec3& operator *=(const float t) {
             (*this)[0] *= t;
             (*this)[1] *= t;
             (*this)[2] *= t;
@@ -149,7 +149,7 @@ class vec3{
             return *this;
         }
 
-        inline vec3& operator /=(const double t) {
+        inline vec3& operator /=(const float t) {
             return *this *= 1 / t;
         }
 
@@ -162,11 +162,11 @@ class vec3{
         }
 
         inline static vec3 random() {
-            return vec3(random_double(), random_double(), random_double());
+            return vec3(random_float(), random_float(), random_float());
         }
 
-        inline static vec3 random(double min, double max) {
-            return vec3(random_double(min, max), random_double(min, max), random_double(min, max));
+        inline static vec3 random(float min, float max) {
+            return vec3(random_float(min, max), random_float(min, max), random_float(min, max));
         }
 
         inline bool approx_zero() const {
@@ -188,7 +188,7 @@ inline vec3 operator -(const vec3 &v, const vec3 &o) {
      return vec3(v[0] - o[0], v[1] - o[1], v[2] - o[2]);
 }
 
-inline vec3 operator *(double t, const vec3 &v) {
+inline vec3 operator *(float t, const vec3 &v) {
     return vec3(t * v[0], t * v[1], t * v[2]);
 }
 
@@ -202,7 +202,7 @@ inline vec3 operator -(const vec3& v, const vec3 &o) {
     //return vec3(v[0] - o[0], v[1] - o[1], v[2] - o[2]);
 }
 
-inline vec3 operator *(double t, vec3 v) {
+inline vec3 operator *(float t, vec3 v) {
     return v *= t;
 }
 */
@@ -211,11 +211,11 @@ inline vec3 operator *(const vec3& v, const vec3& o) {
     return vec3(v[0] * o[0], v[1] * o[1], v[2] * o[2]);
 }
 
-inline vec3 operator *(const vec3 &v, double t) {
+inline vec3 operator *(const vec3 &v, float t) {
     return t * v;
 }
 
-inline vec3 operator /(vec3 v, double t) {
+inline vec3 operator /(vec3 v, float t) {
     return (1/t) * v;
 }
 
@@ -223,13 +223,13 @@ inline vec3 operator -(const vec3 &v)  {
     return -1 * v;
 }
 
-inline double dot(const vec3& v, const vec3& o) {
+inline float dot(const vec3& v, const vec3& o) {
     return v[0] * o[0] + v[1] * o[1] + v[2] * o[2];
 }
 
-inline double length_squared(const vec3& v) {return dot(v, v);}
+inline float length_squared(const vec3& v) {return dot(v, v);}
 
-inline double length(const vec3& v) {return sqrt(length_squared(v));}
+inline float length(const vec3& v) {return sqrt(length_squared(v));}
 
 inline vec3 cross(const vec3& v, const vec3& o) {
     return vec3(v.y() * o.z() - v.z() * o.y(),
@@ -258,7 +258,7 @@ vec3 uniform_random_unit_vector() {
 
 vec3 uniform_random_in_unit_disk() {
     while (true) {
-        vec3 p(random_double(-1, 1), random_double(-1, 1), 0);
+        vec3 p(random_float(-1, 1), random_float(-1, 1), 0);
         if (length_squared(p) < 1) return p;
     }
 }

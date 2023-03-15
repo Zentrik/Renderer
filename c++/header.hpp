@@ -29,44 +29,34 @@ using namespace std::literals::chrono_literals;
 
 // Constants
 
-// constexpr const double infinity = std::numeric_limits<double>::infinity();
-constexpr const double infinity = (std::numeric_limits<double>::max)(); // idk how well infinity plays with fast math
+// constexpr const float infinity = std::numeric_limits<float>::infinity();
+constexpr const float infinity = (std::numeric_limits<float>::max)(); // idk how well infinity plays with fast math
 // max() is defined in Windows.h so we need to wrap entire this in parentheses to prevent that from being used.
-constexpr const double pi = 3.1415926535897932385;
+constexpr const float pi = 3.1415926535897932385;
 
 // Utility Functions
 
-constexpr inline double degrees_to_radians(double degrees) {
+constexpr inline float degrees_to_radians(float degrees) {
     return degrees * pi / 180.0;
 }
 
-#ifdef _WIN32
-inline double random_double() {
+inline float random_float() {
     // Returns a random real in [0,1).
-    return rand() / (RAND_MAX + 1.0);
-}
-#else
-inline double random_double() {
-    #if 0
-    // Returns a random real in [0,1).
-    thread_local static std::random_device rd;
-    thread_local static std::mt19937 rng(rd());
-    thread_local std::uniform_real_distribution<double> urd;
-    return urd(rng, decltype(urd)::param_type{0.0, 1.0});
-    #else
     static thread_local std::mt19937 generator;
-    std::uniform_real_distribution<double> distribution(0., 1.);
+    // generator.seed(45218965);
+    std::uniform_real_distribution<float> distribution(0., 1.);
     return distribution(generator);
-    #endif
 }
-#endif
 
-inline double random_double(double min, double max) {
+inline float random_float(float min, float max) {
     // Returns a random real in [min,max).
-    return min + (max-min)*random_double();
+    // static thread_local std::mt19937 generator;
+    // std::uniform_real_distribution<float> distribution(min, max);
+    // return distribution(generator);
+    return min + (max-min)*random_float();
 }
 
-inline double clamp(double x, double min, double max) {
+inline float clamp(float x, float min, float max) {
     if (x < min) return min;
     if (x > max) return max;
     return x;
