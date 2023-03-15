@@ -2,7 +2,8 @@
 
 #include "hittable.hpp"
 #include "sphere.hpp"
-#include "mathSimd.hpp"
+// #include "mathSimd.hpp"
+#include "version2/vectorclass.h"
 
 #include <memory>
 #include <vector>
@@ -14,11 +15,11 @@ using std::shared_ptr;
 class hittable_list : public hittable
 {
 public:
-    std::vector<float4> centreX;
-    std::vector<float4> centreY;
-    std::vector<float4> centreZ;
+    std::vector<Vec8f> centreX;
+    std::vector<Vec8f> centreY;
+    std::vector<Vec8f> centreZ;
 
-    std::vector<float4> radius;
+    std::vector<Vec8f> radius;
 
     std::vector<shared_ptr<material>> mat_ptr;
 
@@ -29,36 +30,28 @@ public:
     {
         mat_ptr.push_back(object.mat_ptr);
 
-        if (radius.empty() || radius.back()[kSimdWidth - 1] != 0)
+        if (radius.empty() || radius.back()[Vec8f::size() - 1] != 0)
         {
-            centreX.push_back(float4(object.centre.x(), 0.0f, 0.0f, 0.0f));
-            centreY.push_back(float4(object.centre.y(), 0.0f, 0.0f, 0.0f));
-            centreZ.push_back(float4(object.centre.z(), 0.0f, 0.0f, 0.0f));
-            radius.push_back(float4(object.radius, 0.0f, 0.0f, 0.0f));
+            centreX.push_back(Vec8f(object.centre.x(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+            centreY.push_back(Vec8f(object.centre.y(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+            centreZ.push_back(Vec8f(object.centre.z(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+            radius.push_back(Vec8f(object.radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
         }
         else
         {
-            for (int i = 0; i < kSimdWidth; i++)
-            {
-                if (radius.back()[i] == 0)
-                {
-                    float tmpArray[kSimdWidth] = {0, 0, 0, 0};
+            // for (int i = 0; i < Vec8f::size(); i++)
+            // {
+            //     if (radius.back()[i] == 0)
+            //     {
+                    int i = horizontal_find_first(radius.back() == Vec8f(0.0f));
 
-                    tmpArray[i] = object.centre.x();
-                    centreX.back().m = _mm_add_ps(centreX.back().m, float4(tmpArray).m);
-
-                    tmpArray[i] = object.centre.y();
-                    centreY.back().m = _mm_add_ps(centreY.back().m, float4(tmpArray).m);
-
-                    tmpArray[i] = object.centre.z();
-                    centreZ.back().m = _mm_add_ps(centreZ.back().m, float4(tmpArray).m);
-
-                    tmpArray[i] = object.radius;
-                    radius.back().m = _mm_add_ps(radius.back().m, float4(tmpArray).m);
-
-                    break;
-                }
-            }
+                    centreX.back().insert(i, object.centre.x());
+                    centreY.back().insert(i, object.centre.y());
+                    centreZ.back().insert(i, object.centre.z());
+                    radius.back().insert(i, object.radius);
+                    // break;
+            //     }
+            // }
         }
     }
 
@@ -78,46 +71,46 @@ public:
         hit_record temp_rec;
         rec = temp_rec;
 #endif
-        float4 hitT = float4((float)t_max);
-        __m128i id = _mm_set1_epi32(-1);
+        Vec8f hitT((float)t_max);
+        Vec8ui id;
 
-        float4 rOrigX = float4((float)r.origin().x());
-        float4 rOrigY = float4((float)r.origin().y());
-        float4 rOrigZ = float4((float)r.origin().z());
-        float4 rDirX = float4((float)r.direction().x());
-        float4 rDirY = float4((float)r.direction().y());
-        float4 rDirZ = float4((float)r.direction().z());
+        Vec8f rOrigX((float)r.origin().x());
+        Vec8f rOrigY((float)r.origin().y());
+        Vec8f rOrigZ((float)r.origin().z());
+        Vec8f rDirX((float)r.direction().x());
+        Vec8f rDirY((float)r.direction().y());
+        Vec8f rDirZ((float)r.direction().z());
 
-        float4 tMin4 = float4((float)t_min);
-        __m128i curId = _mm_set_epi32(3, 2, 1, 0);
+        Vec8f tMinVec((float)t_min);
+        Vec8ui curId(0, 1, 2, 3, 4, 5, 6, 7);
 
         for (int i = 0; i < radius.size(); i++)
         {
             // load data for 4 spheres
-            float4 ocX = rOrigX - centreX[i];
-            float4 ocY = rOrigY - centreY[i];
-            float4 ocZ = rOrigZ - centreZ[i];
+            Vec8f ocX = rOrigX - centreX[i];
+            Vec8f ocY = rOrigY - centreY[i];
+            Vec8f ocZ = rOrigZ - centreZ[i];
 
-            float4 half_b = ocX * rDirX + ocY * rDirY + ocZ * rDirZ;
-            float4 c = ocX * ocX + ocY * ocY + ocZ * ocZ - radius[i] * radius[i];
-            float4 quarter_discriminant = half_b * half_b - c;
-            bool4 isDiscriminantPositive = quarter_discriminant > float4(0.0f);
+            Vec8f half_b = ocX * rDirX + ocY * rDirY + ocZ * rDirZ;
+            Vec8f c = ocX * ocX + ocY * ocY + ocZ * ocZ - radius[i] * radius[i];
+            Vec8f quarter_discriminant = half_b * half_b - c;
+            Vec8fb isDiscriminantPositive = quarter_discriminant > Vec8f(0.0f);
 
             #if 1
             // if ray hits any of the 4 spheres
-            if (any(isDiscriminantPositive)) // Branching gives 2x speedup
+            if (horizontal_or(isDiscriminantPositive)) // Branching gives 2x speedup
             {
-                float4 quarter_discriminant_root = sqrtf(quarter_discriminant);
+                Vec8f quarter_discriminant_root = sqrt(quarter_discriminant);
 
                 // ray could hit spheres at t0 & t1
-                float4 t0 = -half_b - quarter_discriminant_root;
-                float4 t1 = -half_b + quarter_discriminant_root;
+                Vec8f t0 = -half_b - quarter_discriminant_root;
+                Vec8f t1 = -half_b + quarter_discriminant_root;
 
-                float4 t = select(t1, t0, t0 > tMin4); // if t0 is above min, take it (since it's the earlier hit); else try t1.
-                bool4 msk = isDiscriminantPositive & (tMin4 < t) & (t < hitT);
+                Vec8f t = select(t0 > tMinVec, t0, t1); // if t0 is above min, take it (since it's the earlier hit); else try t1.
+                Vec8fb msk = isDiscriminantPositive & (tMinVec < t) & (t < hitT);
 
-                id = select(id, curId, msk); // get indices of hit spheres
-                hitT = select(hitT, t, msk);
+                id = select(msk, curId, id); // get indices of hit spheres
+                hitT = select(msk, t, hitT);
             }
             #else 
             float4 quarter_discriminant_root = sqrtf(quarter_discriminant);
@@ -132,55 +125,58 @@ public:
             id = select(id, curId, msk); // get indices of hit spheres
             hitT = select(hitT, t, msk);
             #endif
-            curId = _mm_add_epi32(curId, _mm_set1_epi32(kSimdWidth)); // easy way to keep track of which chunk we are on
+            curId += Vec8ui(Vec8f::size()); // easy way to keep track of which chunk we are on
         }
 
         // now we have up to 4 hits, find and return closest one
-        float minT = hmin(hitT);
+        float minT = horizontal_min(hitT);
+        hit_anything = minT < t_max;
 
-        if (minT < t_max)
+        if (hit_anything)
         { // did we hit anything?
-            int minMask = mask(hitT == float4(minT));
+            // int minMask = mask(hitT == Vec8f(minT));
 
-            if (minMask != 0) // why?
-            {
-                int id_scalar[4];
-                float hitT_scalar[4];
+            // if (minMask != 0) // why?
+            // {
+                // int id_scalar[4];
+                // float hitT_scalar[4];
 
-                _mm_storeu_si128((__m128i *)id_scalar, id);
-                _mm_storeu_ps(hitT_scalar, hitT.m);
+                // _mm256_storeu_si256((__m256i *)id_scalar, id);
+                // _mm256_storeu_ps(hitT_scalar, hitT.m);
 
                 // In general, you would do this with a bit scan (first set/trailing zero count).
                 // But who cares, it's only 16 options.
-                static const int laneId[16] =
-                    {
-                        0, 0, 1, 0, // 00xx
-                        2, 0, 1, 0, // 01xx
-                        3, 0, 1, 0, // 10xx
-                        2, 0, 1, 0, // 11xx
-                    };
+                // static const int laneId[16] =
+                //     {
+                //         0, 0, 1, 0, // 00xx
+                //         2, 0, 1, 0, // 01xx
+                //         3, 0, 1, 0, // 10xx
+                //         2, 0, 1, 0, // 11xx
+                //     };
 
-                int lane = laneId[minMask];
-                int hitId = id_scalar[lane];
-                float finalHitT = hitT_scalar[lane];
+                // int lane = laneId[minMask];
 
-                int i = hitId / kSimdWidth;
-                int j = hitId % kSimdWidth;
+                int lane = horizontal_find_first(hitT == Vec8f(minT));
+                int hitId = id[lane];
+                float finalHitT = hitT[lane];
+
+                int i = hitId / Vec8f::size();
+                int j = lane;
 
                 rec.t = (double)finalHitT;
                 rec.p = r.at(rec.t);
                 rec.normal = (rec.p - vec3(centreX[i][j], centreY[i][j], centreZ[i][j])) / radius[i][j];
                 rec.mat_ptr = mat_ptr[hitId];
-                return true;
-            }
+            // }
         }
-        return false;
+
+        return hit_anything;
     }
 };
 #endif
 
 #ifdef AOSOA
-// #define kSimdWidth 2
+#define kSimdWidth 2
 
 /*
 typedef struct {
@@ -641,6 +637,61 @@ public:
     void add(const sphere &object) { objects.push_back(object); }
     void clear() { objects.clear(); }
 
+    #ifdef DontCalculateNormalsEveryHit
+    virtual bool hit(const ray &r, double t_min, double t_max, hit_record &rec) const {
+        bool hit_anything = false;
+#if _MSC_VER // For some reason speeds up msvc
+        hit_record temp_rec;
+        rec = temp_rec;
+#endif
+        rec.t = t_max;
+
+        int bestI = -1;
+
+        // double a = length_squared(r.direction());
+        const double a = 1.0;
+
+#ifdef OMPSIMD
+#pragma omp simd
+#endif
+        for (int i = 0; i < objects.size() - 1; i++) {
+            vec3 oc = r.origin() - objects[i].centre;
+            double half_b = dot(oc, r.direction());
+            double c = length_squared(oc) - objects[i].radius * objects[i].radius;
+
+            double discriminant = half_b * half_b - a * c;
+
+            if (discriminant < 0)
+                continue;
+
+            auto sqrtd = sqrt(discriminant);
+            auto root = (-half_b - sqrtd) / a;
+
+            if (root < t_min || rec.t < root)
+            {
+                root += 2 * sqrtd / a;
+                if (root < t_min || rec.t < root)
+                {
+                    continue;
+                }
+            }
+
+            rec.t = root;
+
+            bestI = i;
+        }
+
+        hit_anything = rec.t < t_max;
+
+        if (hit_anything) {
+            rec.p = r.at(rec.t);
+            rec.normal = (rec.p - objects[bestI].centre) / objects[bestI].radius;
+            rec.mat_ptr = objects[bestI].mat_ptr;
+        }
+        return hit_anything;
+    }
+    #else
+
     virtual bool hit(const ray &r, double t_min, double t_max, hit_record &rec) const
     {
         bool hit_anything = false;
@@ -691,6 +742,7 @@ public:
         hit_anything = rec.t < t_max;
         return hit_anything;
     }
+#endif
 };
 #else
 class hittable_list : public hittable

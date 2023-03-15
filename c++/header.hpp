@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <chrono>
+#include <random>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -39,10 +40,26 @@ constexpr inline double degrees_to_radians(double degrees) {
     return degrees * pi / 180.0;
 }
 
+#ifdef _WIN32
 inline double random_double() {
     // Returns a random real in [0,1).
     return rand() / (RAND_MAX + 1.0);
 }
+#else
+inline double random_double() {
+    #if 0
+    // Returns a random real in [0,1).
+    thread_local static std::random_device rd;
+    thread_local static std::mt19937 rng(rd());
+    thread_local std::uniform_real_distribution<double> urd;
+    return urd(rng, decltype(urd)::param_type{0.0, 1.0});
+    #else
+    static thread_local std::mt19937 generator;
+    std::uniform_real_distribution<double> distribution(0., 1.);
+    return distribution(generator);
+    #endif
+}
+#endif
 
 inline double random_double(double min, double max) {
     // Returns a random real in [min,max).

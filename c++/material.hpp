@@ -52,7 +52,7 @@ double schlick(double cosTheta, double ior_ratio) {
     // Use Schlick's approximation for reflectance.
     double r0 = (1 - ior_ratio) / (1 + ior_ratio);
     r0 *= r0;
-    return r0 + (1 - r0) * pow(1 - cosTheta, 5);
+    return r0 + (1 - r0) * std::pow(1 - cosTheta, 5);
 }
 
 vec3 refract(vec3 unit_direction, vec3 normal, double cosTheta, double ior_ratio) {

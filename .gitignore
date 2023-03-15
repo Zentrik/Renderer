@@ -11,8 +11,12 @@ c++/.vs
 c++/VTune*
 c++/godbolt.zip
 c++/perf.data*
+c++/cachegrind*
+c++/callgrind*
+
 c++/*.exe
 c++/*.out
+
 c++/*.ppm
 
 c++/.fuse*

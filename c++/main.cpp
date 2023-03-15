@@ -168,11 +168,13 @@ hittable_list random_scene() {
 #endif
 
 int main() {
+    #ifdef _WIN32
     srand(0);
+    #endif
 
     // IMAGE
 
-#if 1
+#if 0
     constexpr const auto aspect_ratio = 3. / 2.;
     const int image_width = 400;
     constexpr const int image_height = static_cast<int>(image_width / aspect_ratio);
@@ -214,9 +216,9 @@ int main() {
     // clock_t start_time = clock();
     time_point<Clock> start_time = Clock::now();
 
-    // #pragma omp parallel for num_threads(16) schedule(dynamic, 1)
+    #pragma omp parallel for num_threads(16) schedule(dynamic, 1)
     for (int j = image_height-1; j >= 0; --j) {
-        // std::cout << "\rScanlines remaining: " << j << " " << std::flush;
+        std::cout << "\rScanlines remaining: " << j << " " << std::flush;
         for (int i = 0; i < image_width; ++i) {
             colour& pixel_colour = pixel[j][i];
 
@@ -237,7 +239,7 @@ int main() {
         }
     }
 
-    // std::cout << "\nDone in " << duration_cast<milliseconds>(Clock::now() - start_time).count() << " milliseconds\n";
+    std::cout << "\nDone in " << duration_cast<milliseconds>(Clock::now() - start_time).count() << " milliseconds\n";
 
 #ifdef _WIN32
     Sleep(1000);
