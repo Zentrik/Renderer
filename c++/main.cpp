@@ -10,6 +10,8 @@
 // #define BRANCHLESS
 #define DontCalculateNormalsEveryHit
 
+#define MULTITHREAD
+
 #include "header.hpp"
 #include "colour.hpp"
 #include "hittable_list.hpp"
@@ -74,7 +76,7 @@ colour ray_colour(ray& r, const hittable& world, int depth, random_series& Serie
 #ifdef NOSHAREDPTR
 hittable_list random_scene() {
     hittable_list world;
-    random_series Series{12345678};
+    random_series Series{609824};
 
     auto ground_material = make_shared<lambertian>(colour(0.5, 0.5, 0.5));
     world.add(sphere(point3(0, -1000, 0), 1000, ground_material));
@@ -175,7 +177,7 @@ int main() {
 
     // IMAGE
 
-#if 1
+#if 0
     constexpr const auto aspect_ratio = 3. / 2.;
     const int image_width = 400;
     constexpr const int image_height = static_cast<int>(image_width / aspect_ratio);
@@ -216,10 +218,38 @@ int main() {
     
     // clock_t start_time = clock();
     time_point<Clock> start_time = Clock::now();
-
-    random_series Series;
     
-    #pragma omp parallel for num_threads(16) schedule(dynamic, 1) private(Series)
+#ifdef MULTITHREAD
+#if 1
+    std::vector<int> jIterator;
+
+    for (int j = image_height-1; j >= 0; --j) {
+        jIterator.push_back(j);
+    }
+
+    thread_local random_series Series{124309};
+
+    std::for_each(std::execution::par, jIterator.begin(), jIterator.end(), 
+        [&pixel, cam, world](int j)
+        {
+            std::cout << "\rScanlines remaining: " << j << " " << std::flush;;
+            for (int i = 0; i < image_width; ++i) {
+                colour& pixel_colour = pixel[j][i];
+
+                for (int s = 0; s < samples_per_pixel; ++s) {
+                    auto u = float(i + random_float(Series)) / (image_width - 1);
+                    auto v = float(j + random_float(Series)) / (image_height - 1);
+
+                    ray r = cam.get_ray(u, v, Series);
+
+                    pixel_colour += ray_colour(r, world, max_depth, Series);
+                }
+            }
+        });
+#else
+    random_series Series{124309};
+    
+    #pragma omp parallel for num_threads(16) schedule(dynamic, 1) firstprivate(Series) // firstprivate initialises the variable to passed in value of Series every iteration of j, private uses Series(), i.e. 0 which is bad
     for (int j = image_height-1; j >= 0; --j) {
         std::cout << "\rScanlines remaining: " << j << " " << std::flush;
         for (int i = 0; i < image_width; ++i) {
@@ -235,7 +265,26 @@ int main() {
             }
         }
     }
+#endif
+#else
+    random_series Series{124309};
 
+    for (int j = image_height-1; j >= 0; --j) {
+        std::cout << "\rScanlines remaining: " << j << " " << std::flush;
+        for (int i = 0; i < image_width; ++i) {
+            colour& pixel_colour = pixel[j][i];
+
+            for (int s = 0; s < samples_per_pixel; ++s) {
+                auto u = float(i + random_float(Series)) / (image_width - 1);
+                auto v = float(j + random_float(Series)) / (image_height - 1);
+
+                ray r = cam.get_ray(u, v, Series);
+
+                pixel_colour += ray_colour(r, world, max_depth, Series);
+            }
+        }
+    }
+#endif
 
     for (int j = image_height - 1; j >= 0; --j) {
         for (int i = 0; i < image_width; ++i) {

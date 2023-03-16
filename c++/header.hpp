@@ -6,6 +6,9 @@
 #include <cstdlib>
 #include <fstream>
 #include <chrono>
+#include <algorithm>
+#include <execution>
+#include <exception>
 #include <boost/stacktrace.hpp>
 
 #ifdef _WIN32
@@ -42,6 +45,8 @@ constexpr inline float degrees_to_radians(float degrees) {
 
 struct random_series {
     uint32_t State;
+
+    random_series() = delete; // prevent it being initialised with 0
 };
 
 uint32_t XOrShift32(random_series &Series) {
@@ -54,18 +59,16 @@ uint32_t XOrShift32(random_series &Series) {
     Series.State = x;
     return x;
 }
-
 inline float random_float(random_series &Series) {
     // Returns a random real in [0,1).
+
     float result = (float) XOrShift32(Series) / (float) ((uint32_t) - 1);
     return result;
 }
 
 inline float random_float(random_series &Series, float min, float max) {
     // Returns a random real in [min,max).
-    // static thread_local std::mt19937 generator;
-    // std::uniform_real_distribution<float> distribution(min, max);
-    // return distribution(generator);
+
     return min + (max-min)*random_float(Series);
 }
 
