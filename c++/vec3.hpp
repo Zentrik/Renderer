@@ -246,10 +246,13 @@ inline vec3 normalised(vec3 v) {
 }
 
 vec3 uniform_random_in_unit_sphere(random_series &Series) {
-    while (true) {
+    for (int i = 0; i < 500; i++) {
         vec3 p = vec3::random(Series, -1, 1);
         if (length_squared(p) < 1) return p;
     }
+
+    std::cout << boost::stacktrace::stacktrace();
+    std::throw_with_nested("uniform_random_in_unit_sphere took more than 500 iterations to generate a random number!!!");
 }
 
 vec3 uniform_random_unit_vector(random_series &Series) {
@@ -257,8 +260,15 @@ vec3 uniform_random_unit_vector(random_series &Series) {
 }
 
 vec3 uniform_random_in_unit_disk(random_series &Series) {
-    while (true) {
+    for (int i = 0; i < 500; i++) {
         vec3 p(random_float(Series, -1, 1), random_float(Series, -1, 1), 0);
         if (length_squared(p) < 1) return p;
+
+        if (i > 250) {
+            std::cout << Series.State << "\n";
+        }
     }
+
+    std::cout << boost::stacktrace::stacktrace();
+    std::throw_with_nested(std::range_error("uniform_random_in_unit_disk took more than 500 iterations to generate a random number!!!"));
 }

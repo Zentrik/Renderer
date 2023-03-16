@@ -6,7 +6,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <chrono>
-#include <random>
+#include <boost/stacktrace.hpp>
 
 #ifdef _WIN32
 #include <windows.h>
