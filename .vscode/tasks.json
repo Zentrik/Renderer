@@ -24,10 +24,12 @@
                     "-march=native",
                     "-flto",
                     "-fopenmp",
+                    "-lbenchmark"
+                    // "-tbb"
                 ]
             },
             "linux": {
-                "command": "g++",
+                "command": "g++-12",
                 "options": {
                     "cwd": "${fileDirname}"
                 },
@@ -45,7 +47,8 @@
                     "-march=native",
                     "-flto",
                     "-fopenmp",
-                    "-ltbb" // for for_each std::execution::par, https://stackoverflow.com/questions/65866491/why-is-my-parallel-stdfor-each-only-using-1-thread
+                    "-ltbb", // for for_each std::execution::par, https://stackoverflow.com/questions/65866491/why-is-my-parallel-stdfor-each-only-using-1-thread,
+                    "-lbenchmark"
                 ]
             },
             "problemMatcher": [
@@ -53,6 +56,63 @@
             ],
             "group": "build",
             "detail": "g++ build release."
+        },
+        {
+            "type": "shell",
+            "label": "C/C++: clang++ build active file",
+            "windows": {
+                "command": "C:\\msys64\\ucrt64\\bin\\clang++.exe",
+                "options": {
+                    "cwd": "C:\\msys64\\ucrt64\\bin"
+                },
+                "args": [
+                    "-std=c++17",
+                    "-fdiagnostics-color=always",
+                    "-g",
+                    "${file}",
+                    "-o",
+                    "${fileDirname}\\${fileBasenameNoExtension}.exe",
+                    "-static",
+                    "-static-libstdc++",
+                    "-Wall",
+                    "-Wextra",
+                    "-O3",
+                    "-ffast-math",
+                    "-march=native",
+                    "-flto",
+                    "-fopenmp",
+                    "-lbenchmark"
+                    // "-tbb"
+                ]
+            },
+            "linux": {
+                "command": "clang++",
+                "options": {
+                    "cwd": "${fileDirname}"
+                },
+                "args": [
+                    "-std=c++17",
+                    "-fdiagnostics-color=always",
+                    "-g",
+                    "${file}",
+                    "-o",
+                    "${fileDirname}/${fileBasenameNoExtension}",
+                    "-Wall",
+                    "-Wextra",
+                    "-O3",
+                    "-ffast-math",
+                    "-march=native",
+                    "-flto",
+                    "-fopenmp=libomp",
+                    "-ltbb", // for for_each std::execution::par, https://stackoverflow.com/questions/65866491/why-is-my-parallel-stdfor-each-only-using-1-thread,
+                    "-lbenchmark",
+                ]
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": "build",
+            "detail": "clang++ build release."
         },
         {
             "type": "cppbuild",

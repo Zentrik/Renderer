@@ -3,6 +3,10 @@
 #include <cmath>
 #include <iostream>
 
+#ifndef _MSC_VER
+#include <boost/stacktrace.hpp>
+#endif
+
 float random_float(random_series &Series);
 float random_float(random_series &Series, float min, float max);
 
@@ -251,7 +255,9 @@ vec3 uniform_random_in_unit_sphere(random_series &Series) {
         if (length_squared(p) < 1) return p;
     }
 
+#ifndef _MSC_VER
     std::cout << boost::stacktrace::stacktrace();
+#endif
     std::throw_with_nested("uniform_random_in_unit_sphere took more than 500 iterations to generate a random number!!!");
 }
 
@@ -263,12 +269,10 @@ vec3 uniform_random_in_unit_disk(random_series &Series) {
     for (int i = 0; i < 500; i++) {
         vec3 p(random_float(Series, -1, 1), random_float(Series, -1, 1), 0);
         if (length_squared(p) < 1) return p;
-
-        if (i > 250) {
-            std::cout << Series.State << "\n";
-        }
     }
 
+#ifndef _MSC_VER
     std::cout << boost::stacktrace::stacktrace();
+#endif
     std::throw_with_nested(std::range_error("uniform_random_in_unit_disk took more than 500 iterations to generate a random number!!!"));
 }

@@ -10,7 +10,9 @@
 // #define BRANCHLESS
 #define DontCalculateNormalsEveryHit
 
-#define MULTITHREAD
+// need to install tbb for this if using for_each, otherwise need to install OpenMP
+#define MULTITHREAD // Broken on Visual Studio
+// tbb broken on windows?
 
 #include "header.hpp"
 #include "colour.hpp"
@@ -77,6 +79,7 @@ colour ray_colour(ray& r, const hittable& world, int depth, random_series& Serie
 hittable_list random_scene() {
     hittable_list world;
     random_series Series{609824};
+    // random_series Series{609824, 32479};
 
     auto ground_material = make_shared<lambertian>(colour(0.5, 0.5, 0.5));
     world.add(sphere(point3(0, -1000, 0), 1000, ground_material));
@@ -177,7 +180,14 @@ int main() {
 
     // IMAGE
 
-#if 0
+#ifdef CLAFORTE
+    const auto aspect_ratio = 16. / 9.;
+    const int image_width = 1920;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+    const int samples_per_pixel = 50;
+    const int max_depth = 16;
+#else
+#if 1
     constexpr const auto aspect_ratio = 3. / 2.;
     const int image_width = 400;
     constexpr const int image_height = static_cast<int>(image_width / aspect_ratio);
@@ -189,6 +199,7 @@ int main() {
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 50;
     const int max_depth = 10;
+#endif
 #endif
 
     // WORLD
@@ -220,17 +231,18 @@ int main() {
     time_point<Clock> start_time = Clock::now();
     
 #ifdef MULTITHREAD
-#if 1
+#if 0
     std::vector<int> jIterator;
 
     for (int j = image_height-1; j >= 0; --j) {
         jIterator.push_back(j);
     }
 
+    // thread_local random_series Series{124309, 894323};
     thread_local random_series Series{124309};
 
     std::for_each(std::execution::par, jIterator.begin(), jIterator.end(), 
-        [&pixel, cam, world](int j)
+        [&](int j)
         {
             std::cout << "\rScanlines remaining: " << j << " " << std::flush;;
             for (int i = 0; i < image_width; ++i) {

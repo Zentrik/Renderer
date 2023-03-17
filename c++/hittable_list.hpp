@@ -109,7 +109,7 @@ public:
                 Vec8f t = select(t0 > tMinVec, t0, t1); // if t0 is above min, take it (since it's the earlier hit); else try t1.
                 Vec8fb msk = isDiscriminantPositive & (tMinVec < t) & (t < hitT);
 
-                id = select(msk, curId, id); // get indices of hit spheres
+                id = select((Vec8ib)msk, curId, id); // get indices of hit spheres
                 hitT = select(msk, t, hitT);
             }
             #else 

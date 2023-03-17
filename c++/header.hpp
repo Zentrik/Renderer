@@ -9,7 +9,6 @@
 #include <algorithm>
 #include <execution>
 #include <exception>
-#include <boost/stacktrace.hpp>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -49,7 +48,7 @@ struct random_series {
     random_series() = delete; // prevent it being initialised with 0
 };
 
-uint32_t XOrShift32(random_series &Series) {
+uint32_t XOrShift32(random_series& Series) {
     uint32_t x = Series.State;
 
     x ^= x << 13;
@@ -59,6 +58,27 @@ uint32_t XOrShift32(random_series &Series) {
     Series.State = x;
     return x;
 }
+
+// struct random_series {
+//     uint64_t state;
+//     const uint64_t inc;
+
+//     // random_series() = delete; // prevent it being initialised with 0
+//     random_series() : state{1 + rand()}, inc{1 + rand()} {};
+//     random_series(uint64_t state, uint64_t inc) : state{state}, inc{inc} {};
+// };
+
+// uint32_t pcg_xsh_rs(random_series& Series)
+// {
+//     uint64_t oldstate = Series.state;
+//     // Advance internal state
+//     Series.state = oldstate * 6364136223846793005ULL + (Series.inc|1);
+//     // Calculate output function (XSH RR), uses old state for max ILP
+//     uint32_t xorshifted = ((oldstate >> 18u) ^ oldstate) >> 27u;
+//     uint32_t rot = oldstate >> 59u;
+//     return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
+// }
+
 inline float random_float(random_series &Series) {
     // Returns a random real in [0,1).
 
