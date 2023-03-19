@@ -87,24 +87,24 @@ public:
         for (int i = 0; i < (int)radius.size(); i++)
         {
             // load data for 4 spheres
-            Vec8f ocX = rOrigX - centreX[i];
-            Vec8f ocY = rOrigY - centreY[i];
-            Vec8f ocZ = rOrigZ - centreZ[i];
+            Vec8f coX = centreX[i] - rOrigX;
+            Vec8f coY = centreY[i] - rOrigY;
+            Vec8f coZ = centreZ[i] - rOrigZ;
 
-            Vec8f half_b = ocX * rDirX + ocY * rDirY + ocZ * rDirZ;
-            Vec8f c = ocX * ocX + ocY * ocY + ocZ * ocZ - radius[i] * radius[i];
-            Vec8f quarter_discriminant = half_b * half_b - c;
+            Vec8f neg_half_b = coX * rDirX + coY * rDirY + coZ * rDirZ;
+            Vec8f c = coX * coX + coY * coY + coZ * coZ - radius[i] * radius[i];
+            Vec8f quarter_discriminant = neg_half_b * neg_half_b - c;
             Vec8fb isDiscriminantPositive = quarter_discriminant > Vec8f(0.0f);
 
             #if 1
-            // if ray hits any of the 4 spheres
+            // if ray hits any of the 8 spheres
             if (horizontal_or(isDiscriminantPositive)) // Branching gives 2x speedup using sse (i.e. Vec4f but with Aras' code)
             {
                 Vec8f quarter_discriminant_root = sqrt(quarter_discriminant);
 
                 // ray could hit spheres at t0 & t1
-                Vec8f t0 = -half_b - quarter_discriminant_root;
-                Vec8f t1 = -half_b + quarter_discriminant_root;
+                Vec8f t0 = neg_half_b - quarter_discriminant_root;
+                Vec8f t1 = neg_half_b + quarter_discriminant_root;
 
                 Vec8f t = select(t0 > tMinVec, t0, t1); // if t0 is above min, take it (since it's the earlier hit); else try t1.
                 Vec8fb msk = isDiscriminantPositive & (tMinVec < t) & (t < hitT);
@@ -113,17 +113,37 @@ public:
                 hitT = select(msk, t, hitT);
             }
             #else 
-            float4 quarter_discriminant_root = sqrtf(quarter_discriminant);
+            #if 1 // https://godbolt.org/z/3vfbdb386, looking at g++ we see this show up twice in assembly, the second is likely the actual loop as it branches before sqrt just like clang++. So the speed difference is because we can't branch the sqrt and rest if select is brought out.
+            // Checking perf we see sqrt is branched
+            Vec8f quarter_discriminant_root = sqrt(quarter_discriminant);
 
             // ray could hit spheres at t0 & t1
-            float4 t0 = -half_b - quarter_discriminant_root;
-            float4 t1 = -half_b + quarter_discriminant_root;
+            Vec8f t0 = neg_half_b - quarter_discriminant_root;
+            Vec8f t1 = neg_half_b + quarter_discriminant_root;
 
-            float4 t = select(t1, t0, t0 > tMin4); // if t0 is above min, take it (since it's the earlier hit); else try t1.
-            bool4 msk = isDiscriminantPositive & (tMin4 < t) & (t < hitT);
+            Vec8f t = select(t0 > tMinVec, t0, t1); // if t0 is above min, take it (since it's the earlier hit); else try t1.
 
-            id = select(id, curId, msk); // get indices of hit spheres
-            hitT = select(hitT, t, msk);
+            Vec8fb msk = isDiscriminantPositive & (tMinVec < t) & (t < hitT);   
+
+            // These two selects are slow if not branched, taking these out of branch is 60% slower using Vec8
+            if (horizontal_or(isDiscriminantPositive))
+            {
+                id = select((Vec8ib)msk, curId, id); // get indices of hit spheres
+                hitT = select(msk, t, hitT);
+            }
+            #else
+            Vec8f quarter_discriminant_root = sqrt(quarter_discriminant);
+
+            // ray could hit spheres at t0 & t1
+            Vec8f t0 = neg_half_b - quarter_discriminant_root;
+            Vec8f t1 = neg_half_b + quarter_discriminant_root;
+
+            Vec8f t = select(t0 > tMinVec, t0, t1); // if t0 is above min, take it (since it's the earlier hit); else try t1.
+            Vec8fb msk = isDiscriminantPositive & (tMinVec < t) & (t < hitT);
+
+            id = select((Vec8ib)msk, curId, id); // get indices of hit spheres
+            hitT = select(msk, t, hitT);
+            #endif
             #endif
             curId += Vec8ui(Vec8f::size()); // easy way to keep track of which chunk we are on
         }
