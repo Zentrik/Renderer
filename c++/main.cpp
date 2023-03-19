@@ -76,8 +76,7 @@ colour ray_colour(ray& r, const hittable& world, int depth, random_series& Serie
 }
 
 #ifdef NOSHAREDPTR
-hittable_list random_scene() {
-    hittable_list world;
+void random_scene(hittable_list& world) {
     random_series Series{609824};
     // random_series Series{609824, 32479};
 
@@ -122,8 +121,6 @@ hittable_list random_scene() {
 
     auto material3 = make_shared<metal>(colour(0.7, 0.6, 0.5), 0.0);
     world.add(sphere(point3(4, 1, 0), 1.0, material3));
-
-    return world;
 }
 #else
 hittable_list random_scene() {
@@ -203,7 +200,8 @@ int main() {
 #endif
 
     // WORLD
-    hittable_list world = random_scene();
+    hittable_list world;
+    random_scene(world);
 
     // Camera
 

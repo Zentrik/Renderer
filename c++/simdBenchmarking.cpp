@@ -14,11 +14,11 @@
 
 struct data {
     // std::vector<sphere> spheres;
-    hittable_list scene;
+    hittable_list& scene;
     hit_record rec;
     ray r;
 
-    data(hittable_list scene, hit_record rec, ray r) : scene(scene), rec(rec), r(r) {};
+    data(hittable_list& scene, hit_record rec, ray r) : scene(scene), rec(rec), r(r) {};
 };
 
 template <class ...Args>
@@ -27,7 +27,7 @@ static void runbench(benchmark::State& state, Args&&... args) {
 
     data d = std::get<0>(args_tuple);
 
-    hittable_list scene = d.scene;
+    hittable_list& scene = d.scene;
     hit_record rec = d.rec;
     ray r = d.r;
 

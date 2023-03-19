@@ -4,6 +4,7 @@
 #include "sphere.hpp"
 // #include "mathSimd.hpp"
 #include "version2/vectorclass.h"
+#include "add-on/containers/vector_containers.h"
 
 #include <memory>
 #include <vector>
@@ -15,11 +16,11 @@ using std::shared_ptr;
 class hittable_list : public hittable
 {
 public:
-    std::vector<Vec8f> centreX;
-    std::vector<Vec8f> centreY;
-    std::vector<Vec8f> centreZ;
+    ContainerV<Vec8f, 0> centreX;
+    ContainerV<Vec8f, 0> centreY;
+    ContainerV<Vec8f, 0> centreZ;
 
-    std::vector<Vec8f> radius;
+    ContainerV<Vec8f, 0> radius;
 
     std::vector<shared_ptr<material>> mat_ptr;
 
@@ -30,37 +31,35 @@ public:
     {
         mat_ptr.push_back(object.mat_ptr);
 
-        if (radius.empty() || radius.back()[Vec8f::size() - 1] != 0)
+        if (radius.n_vectors() == 0 || radius.get_element(radius.n_elements() - 1) != 0)
         {
-            centreX.push_back(Vec8f(object.centre.x(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
-            centreY.push_back(Vec8f(object.centre.y(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
-            centreZ.push_back(Vec8f(object.centre.z(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
-            radius.push_back(Vec8f(object.radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+            centreX.set_nvectors(centreX.n_vectors() + 1);
+            centreY.set_nvectors(centreY.n_vectors() + 1);  
+            centreZ.set_nvectors(centreZ.n_vectors() + 1);
+            radius.set_nvectors(radius.n_vectors() + 1);
+
+            centreX.set_vector(Vec8f(object.centre.x(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f), centreX.n_vectors() - 1);
+            centreY.set_vector(Vec8f(object.centre.y(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f), centreY.n_vectors() - 1);
+            centreZ.set_vector(Vec8f(object.centre.z(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f), centreZ.n_vectors() - 1);
+            radius.set_vector(Vec8f(object.radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f), radius.n_vectors() - 1);
         }
         else
         {
-            // for (int i = 0; i < Vec8f::size(); i++)
-            // {
-            //     if (radius.back()[i] == 0)
-            //     {
-                    int i = horizontal_find_first(radius.back() == Vec8f(0.0f));
+            int i = horizontal_find_first(radius.get_vector(radius.n_vectors() - 1) == Vec8f(0.0f));
 
-                    centreX.back().insert(i, object.centre.x());
-                    centreY.back().insert(i, object.centre.y());
-                    centreZ.back().insert(i, object.centre.z());
-                    radius.back().insert(i, object.radius);
-                    // break;
-            //     }
-            // }
+            centreX.set_element(object.centre.x(), (centreX.n_vectors() - 1) * 8 + i);
+            centreY.set_element(object.centre.y(), (centreY.n_vectors() - 1) * 8 + i);
+            centreZ.set_element(object.centre.z(), (centreZ.n_vectors() - 1) * 8 + i);
+            radius.set_element(object.radius, (radius.n_vectors() - 1) * 8 + i);
         }
     }
 
     void clear()
     {
-        centreX.clear();
-        centreY.clear();
-        centreZ.clear();
-        radius.clear();
+        centreX.set_nvectors(0);
+        centreY.set_nvectors(0);
+        centreZ.set_nvectors(0);
+        radius.set_nvectors(0);
         mat_ptr.clear();
     }
 
@@ -82,17 +81,17 @@ public:
         Vec8f rDirZ(r.direction().z());
 
         Vec8f tMinVec(t_min);
-        Vec8ui curId(0, 1, 2, 3, 4, 5, 6, 7);
+        Vec8ui curId(0, 1, 2, 3, 4, 5, 6, 7); // no need for curId and id as we determine j straight from the vector
 
-        for (int i = 0; i < (int)radius.size(); i++)
+        for (int i = 0; i < radius.n_vectors(); i++)
         {
             // load data for 4 spheres
-            Vec8f coX = centreX[i] - rOrigX;
-            Vec8f coY = centreY[i] - rOrigY;
-            Vec8f coZ = centreZ[i] - rOrigZ;
+            Vec8f coX = centreX.get_vector(i) - rOrigX;
+            Vec8f coY = centreY.get_vector(i) - rOrigY;
+            Vec8f coZ = centreZ.get_vector(i) - rOrigZ;
 
             Vec8f neg_half_b = coX * rDirX + coY * rDirY + coZ * rDirZ;
-            Vec8f c = coX * coX + coY * coY + coZ * coZ - radius[i] * radius[i];
+            Vec8f c = coX * coX + coY * coY + coZ * coZ - radius.get_vector(i) * radius.get_vector(i);
             Vec8f quarter_discriminant = neg_half_b * neg_half_b - c;
             Vec8fb isDiscriminantPositive = quarter_discriminant > Vec8f(0.0f);
 
@@ -185,7 +184,7 @@ public:
 
                 rec.t = finalHitT;
                 rec.p = r.at(rec.t);
-                rec.normal = (rec.p - vec3(centreX[i][j], centreY[i][j], centreZ[i][j])) / radius[i][j];
+                rec.normal = (rec.p - vec3(centreX.get_element(hitId), centreY.get_element(hitId), centreZ.get_element(hitId))) / radius.get_element(hitId);
                 rec.mat_ptr = mat_ptr[hitId];
             // }
         }
