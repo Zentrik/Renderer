@@ -14,6 +14,8 @@
 #define MULTITHREAD // Broken on Visual Studio
 // tbb broken on windows?
 
+#define CLAFORTE
+
 #include "header.hpp"
 #include "colour.hpp"
 #include "hittable_list.hpp"
@@ -231,7 +233,7 @@ int main() {
     time_point<Clock> start_time = Clock::now();
     
 #ifdef MULTITHREAD
-#if 0
+#if 1
     std::vector<int> jIterator;
 
     for (int j = image_height-1; j >= 0; --j) {
@@ -258,7 +260,7 @@ int main() {
                 }
             }
         });
-#else
+#else // omp seems to be adding locks for some reason to shared pointers, omp in total about 10% slower
     random_series Series{124309};
     
     #pragma omp parallel for num_threads(16) schedule(dynamic, 1) firstprivate(Series) // firstprivate initialises the variable to passed in value of Series every iteration of j, private uses Series(), i.e. 0 which is bad
