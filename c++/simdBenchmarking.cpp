@@ -8,11 +8,11 @@
 
 struct data {
     // std::vector<sphere> spheres;
-    hittable_list scene;
+    hittable_list& scene;
     hit_record rec;
     ray r;
 
-    data(hittable_list scene, hit_record rec, ray r) : scene(scene), rec(rec), r(r) {};
+    data(hittable_list& scene, hit_record rec, ray r) : scene(scene), rec(rec), r(r) {};
 };
 
 template <class ...Args>
@@ -21,18 +21,14 @@ static void runbench(benchmark::State& state, Args&&... args) {
 
     data d = std::get<0>(args_tuple);
 
-    hittable_list scene = d.scene;
+    hittable_list& scene = d.scene;
     hit_record rec = d.rec;
     ray r = d.r;
 
     for (auto _ : state) {
         scene.hit(r, 1e-4, infinity, rec);
     }
-
-    for (long unsigned int i = 0; i < scene.mat_ptr.size(); i++) {
-        delete scene.mat_ptr[i];
-    }
-
+    
     // std::cout << rec.t << "\n";
 }
 

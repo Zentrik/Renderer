@@ -40,8 +40,7 @@ colour ray_colour(ray& r, const hittable& world, int depth, random_series& Serie
     return colour(0, 0, 0);
 }
 
-hittable_list random_scene() {
-    hittable_list world;
+void random_scene(hittable_list& world) {
     random_series Series{609824};
     // random_series Series{609824, 32479};
 
@@ -77,8 +76,6 @@ hittable_list random_scene() {
     world.add(sphere(point3(-4, 1, 0), 1.0, new lambertian(colour(0.4, 0.2, 0.1))));
 
     world.add(sphere(point3(4, 1, 0), 1.0, new metal(colour(0.7, 0.6, 0.5), 0.0)));
-
-    return world;
 }
 
 int main() {
@@ -107,7 +104,8 @@ int main() {
 #endif
 
     // WORLD
-    hittable_list world = random_scene();
+    hittable_list world;
+    random_scene(world);
 
     // Camera
 

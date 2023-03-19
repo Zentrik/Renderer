@@ -1,3 +1,7 @@
 [submodule "c++/version2"]
 	path = c++/version2
 	url = https://github.com/vectorclass/version2
+	
+[submodule "c++/add-on"]
+	path = c++/add-on
+	url = https://github.com/vectorclass/add-on
