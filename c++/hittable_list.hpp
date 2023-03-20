@@ -2,14 +2,11 @@
 
 #include "hittable.hpp"
 #include "sphere.hpp"
-// #include "mathSimd.hpp"
 #include "version2/vectorclass.h"
 
 #include <memory>
 #include <vector>
 #include <array>
-
-using std::shared_ptr;
 
 #ifdef SIMD
 class hittable_list : public hittable
@@ -21,7 +18,7 @@ public:
 
     std::vector<Vec8f> radius;
 
-    std::vector<shared_ptr<material>> mat_ptr;
+    std::vector<material*> mat_ptr;
 
     hittable_list() {}
     hittable_list(const sphere &object) { add(object); }
@@ -53,15 +50,6 @@ public:
             //     }
             // }
         }
-    }
-
-    void clear()
-    {
-        centreX.clear();
-        centreY.clear();
-        centreZ.clear();
-        radius.clear();
-        mat_ptr.clear();
     }
 
     virtual bool hit(const ray &r, float t_min, float t_max, hit_record &rec) const

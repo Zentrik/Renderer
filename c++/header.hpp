@@ -18,8 +18,6 @@
 
 // Usings
 
-using std::shared_ptr;
-using std::make_shared;
 using std::sqrt;
 
 using Clock = std::chrono::steady_clock;
