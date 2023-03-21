@@ -48,10 +48,10 @@ class sphere {
     public:
         point3 centre;
         float radius;
-        shared_ptr<material> mat_ptr;
+        material* mat_ptr;
 
-        sphere() {}
-        sphere(point3 centre, float radius, shared_ptr<material> m) : centre(centre), radius(radius), mat_ptr(m) {};
+        sphere(point3 centre, float radius, material* m) : centre(centre), radius(radius), mat_ptr(m) {};
+
 
 #if 0
         inline bool hit(const ray& r, double t_min, double t_max, double a, hit_record& rec, hit_record& rec2) const {

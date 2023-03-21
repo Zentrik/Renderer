@@ -13,6 +13,7 @@ c++/godbolt.zip
 c++/perf.data*
 c++/cachegrind*
 c++/callgrind*
+c++/vcpkg
 
 c++/*.exe
 c++/*.out
@@ -20,9 +21,3 @@ c++/*.out
 c++/*.ppm
 
 c++/.fuse*
-
-# https://stackoverflow.com/questions/19023550/how-do-i-add-files-without-dots-in-them-all-extension-less-files-to-the-gitign
-# Ignores files in c++ without extension
-c++/*
-c++/!*/
-c++/*.*

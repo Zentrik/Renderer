@@ -35,13 +35,16 @@ static void runbench(benchmark::State& state, Args&&... args) {
         scene.hit(r, 1e-4, infinity, rec);
     }
 
+    for (long unsigned int i = 0; i < scene.mat_ptr.size(); i++) {
+        delete scene.mat_ptr[i];
+    }
+
     // std::cout << rec.t << "\n";
 }
 
 data setup() {
     // std::vector<sphere> spheres;
     hittable_list scene; 
-    std::shared_ptr<material> mat_ptr;
 
     int N = 300;
 
@@ -49,7 +52,7 @@ data setup() {
         float x = -100 + i * (100 - - 100) / ((float)N - 1.);
         float r = 5 + i * (50 - 5) / ((float)N - 1.);
 
-        scene.add(sphere(vec3(x, x, x), r, mat_ptr));
+        scene.add(sphere(vec3(x, x, x), r, nullptr));
     }
 
     ray r = ray(vec3(0, 0, 0), vec3(0, 1, 0));

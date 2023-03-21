@@ -1,0 +1,3 @@
+[submodule "c++/version2"]
+	path = c++/version2
+	url = https://github.com/vectorclass/version2

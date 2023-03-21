@@ -7,6 +7,8 @@ struct hit_record;
 class material {
     public:
         virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered, random_series &Series) const = 0;
+
+        virtual ~material() {}
 };
 
 class lambertian: public material {
@@ -26,6 +28,8 @@ class lambertian: public material {
             attenuation = albedo;
             return true;
         }
+
+    virtual ~lambertian() {}
 };
 
 vec3 reflect(const vec3& v, const vec3& n) {
@@ -46,6 +50,8 @@ class metal: public material {
 
             return dot(scattered.direction(), rec.normal) > 0;
         }
+
+        virtual ~metal() {}
 };
 
 float schlick(float cosTheta, float ior_ratio) {
@@ -102,4 +108,6 @@ class dielectric : public material {
 
             return true;
         }
+
+        virtual ~dielectric() {}
 };
