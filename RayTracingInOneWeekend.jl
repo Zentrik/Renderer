@@ -79,20 +79,24 @@ norm2(x) = x ⋅ x
 
 @inline @fastmath function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1 # @inline together gives 4x speedup for render. @fastmath gives 2% speedup?
     origin_to_centre = ray.origin - sphere.centre
+
+    a = norm2(ray.direction)
     half_b = ray.direction ⋅ origin_to_centre
     c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
-    quarter_discriminant = half_b^2 - c
+
+    quarter_discriminant = half_b^2 - a*c
+
     if quarter_discriminant < 0
         return -one(c)
     else
         sqrtd = sqrt(quarter_discriminant);
 
         # Find the nearest root that lies in the acceptable range.
-        root = -half_b - sqrtd
+        root = (-half_b - sqrtd) / a
         if tmin < root < tmax
             return root
-        elseif tmin < root + sqrtd * 2 < tmax
-            return root + sqrtd * 2
+        elseif tmin < root + sqrtd * 2 / a < tmax
+            return root + sqrtd * 2 / a
         else 
             return -one(c)
         end
@@ -129,6 +133,7 @@ function reflect(ray, n⃗, fuzz=0)
         direction += fuzz * random_in_unit_sphere()
     end
 
+    return direction
     # This does not absorb if direction is into the object !!!!
     # maybe return zeros(Point) if into and then if in ray_color?
 end
@@ -141,7 +146,8 @@ end
 function glass(ray, n⃗, ior)
     air_ior = 1
 
-    cosθ = - ray.direction ⋅ n⃗
+    unit_direction = normalize(ray.direction)
+    cosθ = - unit_direction ⋅ n⃗
     into = cosθ > 0
     # cosθ = min(cosθ, one(T))
     sinθ = sqrt(1 - cosθ^2)
@@ -155,17 +161,17 @@ function glass(ray, n⃗, ior)
     end
 
     if ior_ratio * sinθ > 1 || rand() < shick(cosθ, ior_ratio)
-        return normalize(reflect(ray, n⃗))
+        return reflect(ray, n⃗)
     else
-        Rperp = ior_ratio * (ray.direction + cosθ * n⃗)
+        Rperp = ior_ratio * (unit_direction + cosθ * n⃗)
         Rpar = - sqrt(1 - norm2(Rperp)) * n⃗
 
-        return normalize(Rperp + Rpar)
+        return Rperp + Rpar
     end
 end
 
 function lambertian(ray, n⃗) 
-    direction = normalize(n⃗ + normalize(random_in_unit_sphere()))
+    direction = n⃗ + normalize(random_in_unit_sphere())
     if all(direction .≈ 0)
         direction = n⃗
     end
@@ -249,7 +255,7 @@ function renderRay(HittableList, maxDepth, pixel_position, camera)
     defocus_random = camera.lens_radius * random_in_unit_disk()
     defocus_offset = defocus_random[1] * normalize(camera.right) + defocus_random[2] * normalize(camera.down)
 
-    ray = Ray(camera.pinhole_location + defocus_offset, normalize(random_pixel_position - camera.pinhole_location - defocus_offset))
+    ray = Ray(camera.pinhole_location + defocus_offset, random_pixel_position - camera.pinhole_location - defocus_offset)
 
     return ray_color(ray, HittableList, maxDepth)
 end
