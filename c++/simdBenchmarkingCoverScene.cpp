@@ -1,13 +1,5 @@
 #include <benchmark/benchmark.h>
 
-#define NOVIRTUAL
-#define NOSHAREDPTR
-#define NOTEMP_REC
-
-#define SIMD
-
-#define DontCalculateNormalsEveryHit
-
 #include "header.hpp"
 #include "colour.hpp"
 #include "hittable_list.hpp"

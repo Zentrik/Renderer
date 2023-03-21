@@ -1,11 +1,5 @@
 #include <benchmark/benchmark.h>
 
-#define NOVIRTUAL
-#define NOSHAREDPTR
-#define NOTEMP_REC
-
-#define SIMD
-
 #include "header.hpp"
 #include "hittable_list.hpp"
 #include "vec3.hpp"

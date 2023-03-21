@@ -14,7 +14,6 @@ colour world_colour(const ray& r) {
 }
 
 colour ray_colour(ray& r, const hittable& world, int depth, random_series& Series) {
-#if 1
     colour accumulated_attenuation(1, 1, 1);
 
     hit_record rec;
@@ -39,29 +38,8 @@ colour ray_colour(ray& r, const hittable& world, int depth, random_series& Serie
 
     // If we've exceeded the ray bounce limit, no more light is gathered.
     return colour(0, 0, 0);
-#else
-    // If we've exceeded the ray bounce limit, no more light is gathered.
-    if (depth <= 0) { 
-        return colour(0,0,0);
-    }
-
-    hit_record rec;
-
-    if (world.hit(r, 1e-4, infinity, rec)) {
-        ray scattered;
-        colour attenuation;
-        
-        if (rec.mat_ptr->scatter(r, rec, attenuation, scattered)) {
-            return attenuation * ray_colour(scattered, world, depth-1);
-        }
-        return colour(0, 0, 0);
-    }
- 
-    return world_colour(r);
-#endif
 }
 
-#ifdef NOSHAREDPTR
 hittable_list random_scene() {
     hittable_list world;
     random_series Series{609824};
@@ -102,59 +80,8 @@ hittable_list random_scene() {
 
     return world;
 }
-#else
-hittable_list random_scene() {
-    hittable_list world;
-
-    auto ground_material = std::make_unique<lambertian>(colour(0.5, 0.5, 0.5));
-    world.add(std::make_unique<sphere>(point3(0,-1000,0), 1000, ground_material));
-
-    for (int a = -11; a < 11; a++) {
-        for (int b = -11; b < 11; b++) {
-            auto choose_mat = random_float();
-            point3 center(a + 0.9*random_float(), 0.2, b + 0.9*random_float());
-
-            if (length(center - point3(4, 0.2, 0)) > 0.9) {
-                unique_ptr<material> sphere_material;
-
-                if (choose_mat < 0.8) {
-                    // diffuse
-                    auto albedo = colour::random() * colour::random();
-                    sphere_material = std::make_unique<lambertian>(albedo);
-                    world.add(std::make_unique<sphere>(center, 0.2, sphere_material));
-                } else if (choose_mat < 0.95) {
-                    // metal
-                    auto albedo = colour::random(0.5, 1);
-                    auto fuzz = random_float(0, 0.5);
-                    sphere_material = std::make_unique<metal>(albedo, fuzz);
-                    world.add(std::make_unique<sphere>(center, 0.2, sphere_material));
-                } else {
-                    // glass
-                    sphere_material = std::make_unique<dielectric>(1.5);
-                    world.add(std::make_unique<sphere>(center, 0.2, sphere_material));
-                }
-            }
-        }
-    }
-
-    auto material1 = std::make_unique<dielectric>(1.5);
-    world.add(std::make_unique<sphere>(point3(0, 1, 0), 1.0, material1));
-
-    auto material2 = std::make_unique<lambertian>(colour(0.4, 0.2, 0.1));
-    world.add(std::make_unique<sphere>(point3(-4, 1, 0), 1.0, material2));
-
-    auto material3 = std::make_unique<metal>(colour(0.7, 0.6, 0.5), 0.0);
-    world.add(std::make_unique<sphere>(point3(4, 1, 0), 1.0, material3));
-
-    return world;
-}
-#endif
 
 int main() {
-    #ifdef _WIN32
-    srand(0);
-    #endif
-
     // IMAGE
 
 #ifdef CLAFORTE
@@ -286,10 +213,4 @@ int main() {
     for (long unsigned int i = 0; i < world.mat_ptr.size(); i++) {
         delete world.mat_ptr[i];
     }
-
-#ifdef _WIN32
-    Sleep(1000);
-#else
-    // sleep(1);
-#endif
 }
