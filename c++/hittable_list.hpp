@@ -73,12 +73,12 @@ public:
         for (int i = 0; i < radius.n_vectors(); i++)
         {
             // load data for 4 spheres
-            Vec8f coX = centreX.get_vector(i) - rOrigX;
-            Vec8f coY = centreY.get_vector(i) - rOrigY;
-            Vec8f coZ = centreZ.get_vector(i) - rOrigZ;
+            Vec8f coX = centreX.get_vector_no_bounds_checking(i) - rOrigX;
+            Vec8f coY = centreY.get_vector_no_bounds_checking(i) - rOrigY;
+            Vec8f coZ = centreZ.get_vector_no_bounds_checking(i) - rOrigZ;
 
             Vec8f neg_half_b = coX * rDirX + coY * rDirY + coZ * rDirZ;
-            Vec8f c = coX * coX + coY * coY + coZ * coZ - radius.get_vector(i) * radius.get_vector(i);
+            Vec8f c = coX * coX + coY * coY + coZ * coZ - radius.get_vector_no_bounds_checking(i) * radius.get_vector_no_bounds_checking(i);
             Vec8f quarter_discriminant = neg_half_b * neg_half_b - c;
             Vec8fb isDiscriminantPositive = quarter_discriminant > Vec8f(0.0f);
 
