@@ -31,18 +31,18 @@ function findSceneIntersection(ray, hittable_list, tmin::T, tmax::T)
     besti::Int32 = 0
 
     @turbo for i in eachindex(hittable_list.Sphere)
-        ocx = ray.origin.x - hittable_list.Sphere.centre.x[i]
-        ocy = ray.origin.y - hittable_list.Sphere.centre.y[i]
-        ocz = ray.origin.z - hittable_list.Sphere.centre.z[i]
+        cox = hittable_list.Sphere.centre.x[i] - ray.origin.x
+        coy = hittable_list.Sphere.centre.y[i] - ray.origin.y 
+        coz = hittable_list.Sphere.centre.z[i] - ray.origin.z
 
-        half_b = ray.direction.x * ocx + ray.direction.y * ocy + ray.direction.z * ocz
-        c = ocx^2 + ocy^2 + ocz^2 - hittable_list.Sphere.radius[i]^2
+        neg_half_b = ray.direction.x * cox + ray.direction.y * coy + ray.direction.z * coz
+        c = cox^2 + coy^2 + coz^2 - hittable_list.Sphere.radius[i]^2
 
-        quarter_discriminant = half_b^2 - c
+        quarter_discriminant = neg_half_b^2 - c
         sqrtd = sqrt(quarter_discriminant) # When using fastmath, negative values just give 0
 
-        root = -half_b - sqrtd
-        root2 = -half_b + sqrtd
+        root = neg_half_b - sqrtd
+        root2 = neg_half_b + sqrtd
 
         t = ifelse(quarter_discriminant < 0, T(Inf), 
                 ifelse(tmin < root < tmax, root, 
@@ -58,9 +58,11 @@ function findSceneIntersection(ray, hittable_list, tmin::T, tmax::T)
         # tmax = min(t, tmax)
 
         newMinT = t < tmax
-        tmax = ifelse(newMinT, t, tmax)
-        besti = ifelse(newMinT, i, besti)
 
+        # if (quarter_discriminant > 0)
+            tmax = ifelse(newMinT, t, tmax)
+            besti = ifelse(newMinT, i, besti)
+        # end
 
 
         # t = ifelse(root > tmin, root, root2)
@@ -83,6 +85,7 @@ findSceneIntersection(ray, scene, T(1e-4), T(Inf))
 # I just specified this in the function so fine now
 @benchmark findSceneIntersection($ray, $scene, $(T(1e-4)), $(T(Inf)))
 @code_llvm debuginfo=:none findSceneIntersection(ray, scene, T(1e-4), T(Inf))
+@code_native debuginfo=:none syntax=:intel findSceneIntersection(ray, scene, T(1e-4), T(Inf))
 
 function findSceneIntersectionNotSIMD(ray, hittable_list, tmin::T, tmax::T)
     besti::Int32 = 0
@@ -190,6 +193,9 @@ findSceneIntersection(ray, scene, T(1e-4), T(Inf), Base.OneTo{Int32}(length(scen
 # turn of @turbo if you want something sane
 @code_typed debuginfo=:none findSceneIntersection(ray, scene, T(1e-4), T(Inf), Int32(1):Int32(length(scene.Sphere)))
 @code_llvm debuginfo=:none findSceneIntersection(ray, scene, T(1e-4), T(Inf), Int32(1):Int32(length(scene.Sphere)))
+
+
+
 
 struct Spheres{F}
     centre_x::F
