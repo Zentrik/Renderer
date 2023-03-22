@@ -9,7 +9,7 @@ in_one_weekend/target
 c++/x64
 c++/.vs
 c++/VTune*
-c++/godbolt.zip
+c++/godbolt*.zip
 c++/perf.data*
 c++/cachegrind*
 c++/callgrind*

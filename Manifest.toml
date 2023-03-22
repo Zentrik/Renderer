@@ -143,9 +143,9 @@ version = "0.1.12"
 
 [[deps.Clustering]]
 deps = ["Distances", "LinearAlgebra", "NearestNeighbors", "Printf", "Random", "SparseArrays", "Statistics", "StatsBase"]
-git-tree-sha1 = "64df3da1d2a26f4de23871cd1b6482bb68092bd5"
+git-tree-sha1 = "7ebbd653f74504447f1c33b91cd706a69a1b189f"
 uuid = "aaaa29a8-35af-508c-8bc3-b662a17a0fe5"
-version = "0.14.3"
+version = "0.14.4"
 
 [[deps.CodeTracking]]
 deps = ["InteractiveUtils", "UUIDs"]
@@ -223,10 +223,10 @@ uuid = "adafc99b-e345-5852-983c-f28acb93d879"
 version = "0.3.1"
 
 [[deps.Cthulhu]]
-deps = ["CodeTracking", "FoldingTrees", "InteractiveUtils", "JuliaSyntax", "Preferences", "REPL", "SnoopPrecompile", "TypedSyntax", "UUIDs", "Unicode"]
-git-tree-sha1 = "2408f1ab7c89b75b0cebb95b43cf7881bfabc875"
+deps = ["CodeTracking", "FoldingTrees", "InteractiveUtils", "JuliaSyntax", "Preferences", "REPL", "SnoopPrecompile", "TypedSyntax", "UUIDs", "Unicode", "WidthLimitedIO"]
+git-tree-sha1 = "3cde9984c2d0fe6428cc3a68ef7fa0359135f00a"
 uuid = "f68482b8-f384-11e8-15f7-abe071a5a75f"
-version = "2.8.5"
+version = "2.8.6"
 
 [[deps.CustomUnitRanges]]
 git-tree-sha1 = "1a3f97f907e6dd8983b744d2642651bb162a3f7a"
@@ -613,9 +613,9 @@ version = "1.0.0"
 
 [[deps.JET]]
 deps = ["InteractiveUtils", "JuliaInterpreter", "LoweredCodeUtils", "MacroTools", "Pkg", "Revise", "SnoopPrecompile", "Test"]
-git-tree-sha1 = "f6ff4b89810b68f4125c915d1d5e20fd641724ec"
+git-tree-sha1 = "36d7369aa923f1fdfb7985c0793e48aefc724071"
 uuid = "c3a54625-cd67-489e-a8e7-0a5a0ff4e31b"
-version = "0.7.8"
+version = "0.7.9"
 
 [[deps.JLD2]]
 deps = ["FileIO", "MacroTools", "Mmap", "OrderedCollections", "Pkg", "Printf", "Reexport", "Requires", "TranscodingStreams", "UUIDs"]
@@ -654,9 +654,9 @@ uuid = "aa1ae85d-cabe-5617-a682-6adf51b2e16a"
 version = "0.9.22"
 
 [[deps.JuliaSyntax]]
-git-tree-sha1 = "db2bdeda30e452485863799be4515f6305431a46"
+git-tree-sha1 = "5f0b864db9e8d7c109eba0fe7d306a108fda5056"
 uuid = "70703baa-626e-46a2-a12c-08ffd08c73b4"
-version = "0.3.2"
+version = "0.3.3"
 
 [[deps.LERC_jll]]
 deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
@@ -1162,9 +1162,9 @@ version = "1.3.0"
 
 [[deps.StaticArrays]]
 deps = ["LinearAlgebra", "Random", "StaticArraysCore", "Statistics"]
-git-tree-sha1 = "6aa098ef1012364f2ede6b17bf358c7f1fbe90d4"
+git-tree-sha1 = "7756ce473bd10b67245bdebdc8d8670a85f6230b"
 uuid = "90137ffa-7385-5640-81b9-e52037218182"
-version = "1.5.17"
+version = "1.5.18"
 
 [[deps.StaticArraysCore]]
 git-tree-sha1 = "6b7ba252635a5eff6a0b0664a41ee140a1c9e72a"
@@ -1284,9 +1284,9 @@ version = "1.3.0"
 
 [[deps.TypedSyntax]]
 deps = ["CodeTracking", "JuliaSyntax"]
-git-tree-sha1 = "73862b230f61e2619c150bd8c9a86e64ab6faa0d"
+git-tree-sha1 = "55136d67bab4820401b4e89788e96da80ce1860c"
 uuid = "d265eb64-f81a-44ad-a842-4247ee1503de"
-version = "1.1.2"
+version = "1.1.4"
 
 [[deps.UUIDs]]
 deps = ["Random", "SHA"]
@@ -1311,6 +1311,12 @@ deps = ["LoopVectorization", "Static"]
 git-tree-sha1 = "a10cfef26aedae8c2b1892ea1fda9749cdfe3764"
 uuid = "4ffe575c-65e5-43f4-bc05-e0b500dc3d2c"
 version = "0.1.8"
+
+[[deps.WidthLimitedIO]]
+deps = ["Unicode"]
+git-tree-sha1 = "71142739e695823729a335e9bc124ef41ec1433a"
+uuid = "b8c1c048-cf81-46c6-9da0-18c1d99e41f2"
+version = "1.0.1"
 
 [[deps.WoodburyMatrices]]
 deps = ["LinearAlgebra", "SparseArrays"]
@@ -1390,10 +1396,10 @@ uuid = "3161d3a3-bdf6-5164-811a-617609db77b4"
 version = "1.5.4+0"
 
 [[deps.ZygoteRules]]
-deps = ["MacroTools"]
-git-tree-sha1 = "8c1a8e4dfacb1fd631745552c8db35d0deb09ea0"
+deps = ["ChainRulesCore", "MacroTools"]
+git-tree-sha1 = "977aed5d006b840e2e40c0b48984f7463109046d"
 uuid = "700de1a5-db45-46bc-99cf-38207098b444"
-version = "0.2.2"
+version = "0.2.3"
 
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl", "OpenBLAS_jll"]

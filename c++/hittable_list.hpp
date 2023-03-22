@@ -66,7 +66,7 @@ public:
 
         for (int i = 0; i < (int)radius.size(); i++)
         {
-            // load data for 4 spheres
+            // load data for n spheres
             Vec8f coX = centreX[i] - rOrigX;
             Vec8f coY = centreY[i] - rOrigY;
             Vec8f coZ = centreZ[i] - rOrigZ;
@@ -76,7 +76,7 @@ public:
             Vec8f quarter_discriminant = neg_half_b * neg_half_b - c;
             Vec8fb isDiscriminantPositive = quarter_discriminant > Vec8f(0.0f);
 
-            // if ray hits any of the 8 spheres
+            // if ray hits any of the n spheres
             if (horizontal_or(isDiscriminantPositive)) // Branching gives 2x speedup using sse (i.e. Vec4f but with Aras' code)
             {
                 Vec8f quarter_discriminant_root = sqrt(quarter_discriminant);
@@ -94,7 +94,7 @@ public:
             curId += Vec8ui(Vec8f::size()); // easy way to keep track of which chunk we are on
         }
 
-        // now we have up to 4 hits, find and return closest one
+        // now we have up to n hits, find and return closest one
         float minT = horizontal_min(hitT);
         hit_anything = minT < t_max;
 
