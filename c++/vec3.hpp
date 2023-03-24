@@ -7,6 +7,7 @@
 #include <boost/stacktrace.hpp>
 #endif
 
+struct random_series;
 float random_float(random_series &Series);
 float random_float(random_series &Series, float min, float max);
 

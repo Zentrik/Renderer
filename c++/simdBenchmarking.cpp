@@ -7,7 +7,6 @@
 #include "sphere.hpp"
 
 struct data {
-    // std::vector<sphere> spheres;
     hittable_list scene;
     hit_record rec;
     ray r;
@@ -33,11 +32,9 @@ static void runbench(benchmark::State& state, Args&&... args) {
         delete scene.mat_ptr[i];
     }
 
-    // std::cout << rec.t << "\n";
 }
 
 data setup() {
-    // std::vector<sphere> spheres;
     hittable_list scene; 
 
     int N = 300;
@@ -61,15 +58,8 @@ data setup() {
 //     d.scene.hit(d.r, 1e-4, infinity, d.rec);
 //     std::cout << d.rec.t << "\n";
 
-//     // std::cout << d.spheres[177].centre.x() << " " << d.spheres[177].centre.y() << " " << d.spheres[177].centre.z() << "   " << d.spheres[177].radius << "\n";
-//     // d.spheres[177].hit(d.r, 1e-4, INFINITY, d.rec);
-//     // std::cout << d.rec.t << "\n";
-
 //     return 0;
 // }
 
-// BENCHMARK_CAPTURE(runbench, testes, data(std::vector<sphere> spheres(sphere()), 1, hit_record(), ray()) );
 BENCHMARK_CAPTURE(runbench, scene interesction, setup());
 BENCHMARK_MAIN();
-
-// g++ simdBenchmarking.cpp -std=c++20 -lbenchmark -pthread -o simdBenchmarking

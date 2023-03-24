@@ -26,6 +26,12 @@ end
 StructArrays.component(m::Point, key::Symbol) = getproperty(m, key)
 StructArrays.createinstance(::Type{Point}, args...) = Point(args)
 
+N = 300
+spheres = Sphere.([Point(1, 1, 1) * v for v in range(-100, 100, N)], range(5, 50, N))
+scene = Scene(StructArray(spheres, unwrap = T -> !(T<:Real)));
+# scene = Scene(spheres);
+ray = Ray()
+
 function findSceneIntersection(ray, hittable_list, tmin::T, tmax::T)
     besti::Int32 = 0
 
@@ -43,7 +49,7 @@ function findSceneIntersection(ray, hittable_list, tmin::T, tmax::T)
         root = neg_half_b - sqrtd
         root2 = neg_half_b + sqrtd
 
-        t = ifelse(quarter_discriminant < 0, tmax, 
+        t = ifelse(quarter_discriminant < T(0), tmax, 
                 ifelse(tmin < root < tmax, root, 
                     ifelse(tmin < root2 < tmax, root2, tmax)))
 
@@ -55,18 +61,185 @@ function findSceneIntersection(ray, hittable_list, tmin::T, tmax::T)
     return tmax, besti
 end
 
-N = 300
-spheres = Sphere.([Point(1, 1, 1) * v for v in range(-100, 100, N)], range(5, 50, N))
-scene = Scene(StructArray(spheres, unwrap = T -> !(T<:Real)));
-# scene = Scene(spheres);
-ray = Ray()
-
 findSceneIntersection(ray, scene, T(1e-4), T(Inf))
 # Very important tmin, tmax are of type T
 # I just specified this in the function so fine now
 @benchmark findSceneIntersection($ray, $scene, $(T(1e-4)), $(T(Inf)))
 @code_llvm debuginfo=:none findSceneIntersection(ray, scene, T(1e-4), T(Inf))
 @code_native debuginfo=:none syntax=:intel findSceneIntersection(ray, scene, T(1e-4), T(Inf))
+
+using VectorizationBase
+
+@inline function maybecompute(
+    neg_half_b::VectorizationBase.Vec{W,T},
+    quarter_discriminant::VectorizationBase.Vec{W,T},
+    tmax::VectorizationBase.Vec{W,T},
+    tmin::VectorizationBase.Vec{W,T}
+) where {W,T}
+    m = quarter_discriminant > T(0)
+    !VectorizationBase.vany(m) && return tmax
+
+    sqrtd = sqrt(quarter_discriminant) # When using fastmath, negative values just give 0
+
+    root = neg_half_b - sqrtd
+    root2 = neg_half_b + sqrtd
+
+    t = ifelse(quarter_discriminant <= T(0), tmax, 
+            ifelse((tmin < root) & (root < tmax), root, 
+                ifelse((tmin < root2) & (root2 < tmax), root2, tmax)))
+
+    return t
+end
+
+@inline function maybecompute(x::VecUnroll, y::VecUnroll, z::VecUnroll, tmin::VectorizationBase.Vec{W,T}) where {W, T}
+  VecUnroll(
+    VectorizationBase.fmap(
+      maybecompute,
+      VectorizationBase.data(x),
+      VectorizationBase.data(y),
+      VectorizationBase.data(z),
+      tmin,
+    )
+  )
+end
+
+function findSceneIntersection_maybecompute(ray, hittable_list, tmin::T, tmax::T)
+    besti::Int32 = 0
+    x = VectorizationBase.Vec{8,T}(tmin)
+
+    @turbo for i in eachindex(hittable_list.Sphere)
+        cox = hittable_list.Sphere.centre.x[i] - ray.origin.x
+        coy = hittable_list.Sphere.centre.y[i] - ray.origin.y 
+        coz = hittable_list.Sphere.centre.z[i] - ray.origin.z
+
+        neg_half_b = ray.direction.x * cox + ray.direction.y * coy + ray.direction.z * coz
+        c = cox^2 + coy^2 + coz^2 - hittable_list.Sphere.radius[i]^2
+
+        quarter_discriminant = neg_half_b^2 - c
+        t = maybecompute(neg_half_b, quarter_discriminant, tmax, x)
+
+        newMinT = t < tmax
+        tmax = ifelse(newMinT, t, tmax)
+        besti = ifelse(newMinT, i, besti)
+    end    
+
+    return tmax, besti
+end
+
+findSceneIntersection_maybecompute(ray, scene, T(1e-4), T(Inf))
+@benchmark findSceneIntersection_maybecompute($ray, $scene, $(T(1e-4)), $(T(Inf)))
+@code_llvm debuginfo=:none findSceneIntersection_maybecompute(ray, scene, T(1e-4), T(Inf))
+@code_native debuginfo=:none syntax=:intel findSceneIntersection_maybecompute(ray, scene, T(1e-4), T(Inf))
+
+function findSceneIntersection_maybecompute(ray, centrex, centrey, centrez, radius, tmin::T, tmax::T)
+    besti::Int32 = 0
+    x = VectorizationBase.Vec{8,T}(tmin)
+
+    @turbo for i in eachindex(radius)
+        cox = centrex[i] - ray.origin.x
+        coy = centrey[i] - ray.origin.y 
+        coz = centrez[i] - ray.origin.z
+
+        neg_half_b = ray.direction.x * cox + ray.direction.y * coy + ray.direction.z * coz
+        c = cox^2 + coy^2 + coz^2 - radius[i]^2
+
+        quarter_discriminant = neg_half_b^2 - c
+        t = maybecompute(neg_half_b, quarter_discriminant, tmax, x)
+
+        newMinT = t < tmax
+        tmax = ifelse(newMinT, t, tmax)
+        besti = ifelse(newMinT, i, besti)
+    end    
+
+    return tmax, besti
+end
+
+findSceneIntersection_maybecompute(ray, scene.Sphere.centre.x, scene.Sphere.centre.y, scene.Sphere.centre.z, scene.Sphere.radius, T(1e-4), T(Inf))
+
+centrex = scene.Sphere.centre.x
+@benchmark findSceneIntersection_maybecompute($ray, $centrex, $scene.Sphere.centre.y, $scene.Sphere.centre.z, $scene.Sphere.radius, $(T(1e-4)), $(T(Inf)))
+@code_native debuginfo=:none syntax=:intel findSceneIntersection_maybecompute(ray, scene, T(1e-4), T(Inf))
+
+using SIMD
+
+scene = Scene(StructArray(vcat(spheres, Sphere.(zeros(Point, 4), zeros(T, 4))), unwrap = T -> !(T<:Real)));
+
+SIMD.Intrinsics.add(x::NTuple{8, VecElement{Int32}}, y::NTuple{8, VecElement{Int32}}, ::SIMD.Intrinsics.FastMathFlags{128}) = SIMD.Intrinsics.add(x, y)
+
+@eval @generated function fcmp_ogt(x::SIMD.LVec{N, T}, y::SIMD.LVec{N, T}, ::F=nothing) where {N, T <: SIMD.FloatingTypes, F<:SIMD.Intrinsics.FPFlags}
+    fpflags = SIMD.Intrinsics.fp_str(F)
+    fflag = $(QuoteNode(:ogt))
+    s = """
+    %res = fcmp $(fpflags) $(fflag) <$(N) x $(SIMD.Intrinsics.d[T])> %0, %1
+    %resb = sext <$(N) x i1> %res to <$(N) x i8>
+    ret <$(N) x i8> %resb
+    """
+    return :(
+        $(Expr(:meta, :inline));
+        Base.llvmcall($s, SIMD.LVec{N, Bool}, Tuple{SIMD.LVec{N, T}, SIMD.LVec{N, T}}, x, y)
+    )
+end
+
+function horizontal_or(x)
+    b = SIMD.Intrinsics.bitcast(SIMD.LVec{8, Float32}, convert(SIMD.Vec{8, Int32}, x).data)
+    return ccall("llvm.x86.avx.vtestz.ps.256", llvmcall, Int32, (SIMD.LVec{8, Float32}, SIMD.LVec{8, Float32}), b, b) == 0
+end
+
+function findSceneIntersectionIntrinsics(ray, hittable_list, tmin, tmax)
+    width = 8
+    lane = VecRange{width}(1)
+
+    laneIndices = SIMD.Vec{width, Int32}(Int32.((1, 2, 3, 4, 5, 6, 7, 8)))
+    minIndex = SIMD.Vec{width, Int32}(0)
+
+    rayOrigX = SIMD.Vec{width, T}(ray.origin.x)
+    rayOrigY = SIMD.Vec{width, T}(ray.origin.y)
+    rayOrigZ = SIMD.Vec{width, T}(ray.origin.z)
+    rayDirX = SIMD.Vec{width, T}(ray.direction.x)
+    rayDirY = SIMD.Vec{width, T}(ray.direction.y)
+    rayDirZ = SIMD.Vec{width, T}(ray.direction.z)
+
+    tmaxVec = SIMD.Vec{width, T}(tmax)
+    tminVec = SIMD.Vec{width, T}(tmin)
+
+    @inbounds @fastmath for i in 0:width:length(hittable_list.Sphere)
+        cox = hittable_list.Sphere.centre.x[lane + i] - rayOrigX
+        coy = hittable_list.Sphere.centre.y[lane + i] - rayOrigY
+        coz = hittable_list.Sphere.centre.z[lane + i] - rayOrigZ
+
+        neg_half_b = rayDirX * cox + rayDirY * coy + rayDirZ * coz
+        c = cox*cox + coy*coy + coz*coz - hittable_list.Sphere.radius[lane + i] * hittable_list.Sphere.radius[lane + i]
+
+        quarter_discriminant = neg_half_b^2 - c
+        isDiscriminantPositive = SIMD.Vec(fcmp_ogt(quarter_discriminant.data, SIMD.Vec{width, T}(0).data))
+
+        if horizontal_or(isDiscriminantPositive)
+            sqrtd = sqrt(quarter_discriminant) # When using fastmath, negative values just give 0
+    
+            root = neg_half_b - sqrtd
+            root2 = neg_half_b + sqrtd
+
+            t = vifelse(root > tminVec, root, root2)
+
+            newMinT = isDiscriminantPositive & (tminVec < t) & (t < tmaxVec)
+            tmaxVec = vifelse(newMinT, t, tmaxVec)
+            minIndex = vifelse(newMinT, laneIndices, minIndex)
+        end
+
+        laneIndices += SIMD.Vec{width, Int32}(Int32(8))
+    end    
+
+    thit = minimum(tmaxVec)
+    return thit, minIndex
+end
+
+findSceneIntersectionIntrinsics(ray, scene, T(1e-4), T(Inf))
+@benchmark findSceneIntersectionIntrinsics($ray, $scene, T(1e-4), T(Inf))
+# @profview map(_ -> findSceneIntersectionIntrinsics(ray, scene, T(1e-4), T(Inf)), 1:10000)
+# @profview findSceneIntersectionIntrinsics(ray, scene, T(1e-4), T(Inf))
+@code_warntype findSceneIntersectionIntrinsics(ray, scene, T(1e-4), T(Inf))
+@code_llvm debuginfo=:none findSceneIntersectionIntrinsics(ray, scene, T(1e-4), T(Inf))
+@code_native debuginfo=:none syntax=:intel findSceneIntersectionIntrinsics(ray, scene, T(1e-4), T(Inf))
 
 function findSceneIntersectionNotSIMD(ray, hittable_list, tmin::T, tmax::T)
     besti::Int32 = 0
@@ -226,3 +399,21 @@ findSceneIntersection(ray, scene, T(1e-4), T(Inf), b, cs)
 using JET
 
 @report_opt findSceneIntersection(ray, scene, T(1e-4), T(Inf), b, cs)
+
+
+
+
+
+
+
+
+
+
+
+
+__m128i = NTuple{2, VecElement{Int64}};
+__m128i = SIMD.Vec{2, Int64}
+
+aesdec(a, roundkey) = ccall("llvm.x86.aesni.aesdec", llvmcall, __m128i, (__m128i, __m128i), a, roundkey);
+
+aesdec(__m128i((213132, 13131)), __m128i((31231, 43213)))
