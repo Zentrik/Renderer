@@ -285,7 +285,9 @@ function scene_random_spheres()
 	push!(HittableList, Sphere([-4,0,1], 1, [0.4,0.2,0.1], lambertian))
 	push!(HittableList, Sphere([4,0,1], 1, [0.7,0.6,0.5], metal()))
 
-    return HittableList
+    append!(HittableList, repeat([Sphere(zeros(Point), 0)], (8 - length(HittableList) % 8)))
+    tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
+    return hittable_list(tmp);
 end
 
 function renderRay(HittableList, maxDepth, pixel_position, camera)
@@ -316,16 +318,18 @@ end
 
 spectrumToRGB(spectrum_img) = map(x -> RGB(sqrt.(x)...), spectrum_img)
 
-function claforte(print=true)
+function setup(resolution=1920/2)
     HittableList = scene_random_spheres();
-
-    append!(HittableList, repeat([Sphere(zeros(Point), 0)], (8 - length(HittableList) % 8)))
-    @inline tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
-    scene = hittable_list(tmp);
-
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
+    spectrum_img = zeros(Spectrum, reverse(imagesize(resolution, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=1000)
+
+    return HittableList, spectrum_img, camera
+end
+
+function claforte(;print=true, parallel=true)
+    HittableList, spectrum_img, camera = setup(1920)
+
+    @time render!(spectrum_img, HittableList, camera, samples_per_pixel=1000, parallel=parallel)
     rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
@@ -334,15 +338,9 @@ function claforte(print=true)
 end
 
 function run(;print=false, parallel=true)
-    HittableList = scene_random_spheres();
+    HittableList, spectrum_img, camera = setup()
 
-    append!(HittableList, repeat([Sphere(zeros(Point), 0)], (8 - length(HittableList) % 8)))
-    @inline tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
-    scene = hittable_list(tmp);
-
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
+    render!(spectrum_img, HittableList, camera, samples_per_pixel=10, parallel=parallel)
     rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
@@ -350,16 +348,10 @@ function run(;print=false, parallel=true)
     return rgb_img
 end
 
-function test(print=false)
-    HittableList = scene_random_spheres();
-    
-    append!(HittableList, repeat([Sphere(zeros(Point), 0)], (8 - length(HittableList) % 8)))
-    @inline tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
-    scene = hittable_list(tmp);
+function test(;print=false, parallel=true)
+    HittableList, spectrum_img, camera = setup(1920/10)
 
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/10, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=5)
+    @time render!(spectrum_img, HittableList, camera, samples_per_pixel=5, parallel=parallel)
     rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
@@ -369,11 +361,9 @@ end
 
 using Profile, PProf
 function profile()
-    HittableList = scene_random_spheres();
-    scene = hittable_list(HittableList);
-    spectrum_img = zeros(Spectrum, reverse(imagesize(10, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    render!(spectrum_img, scene, camera, samples_per_pixel=10)
+    HittableList, spectrum_img, camera = setup(10)
+
+    render!(spectrum_img, HittableList, camera, samples_per_pixel=10)
 
     Profile.Allocs.clear(); 
 
@@ -384,33 +374,14 @@ end
 
 using BenchmarkTools
 function benchmark(;print=false, parallel=true)
-    HittableList = scene_random_spheres();
+    HittableList, spectrum_img, camera = setup()
 
-    append!(HittableList, repeat([Sphere(zeros(Point), 0)], (8 - length(HittableList) % 8)))
-    @inline tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
-    scene = hittable_list(tmp);
-
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=10, parallel=$parallel))
+    display(@benchmark render!($spectrum_img, $HittableList, $camera, samples_per_pixel=10, parallel=$parallel))
     rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
     end
     return nothing
-end
-
-function setup()
-    HittableList = scene_random_spheres();
-
-    append!(HittableList, repeat([Sphere(zeros(Point), 0)], (8 - length(HittableList) % 8)))
-    @inline tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
-    scene = hittable_list(tmp);
-
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-
-    return (spectrum_img, scene, camera)
 end
 
 # save("render.png", rgb_img)
