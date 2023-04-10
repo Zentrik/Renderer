@@ -286,7 +286,7 @@ function run(print=false)
     scene = hittable_list(HittableList);
     spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @profview render!(spectrum_img, scene, camera, samples_per_pixel=10)
+    render!(spectrum_img, scene, camera, samples_per_pixel=10)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -334,6 +334,15 @@ function benchmark(;print=false, parallel=true)
         rgb_img |> display
     end
     return nothing
+end
+
+function setup()
+    HittableList = scene_random_spheres();
+    scene = hittable_list(HittableList);
+    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
+    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+
+    return (spectrum_img, scene, camera)
 end
 
 # save("render.png", rgb_img)
