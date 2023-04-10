@@ -1,0 +1,71 @@
+;  @ h:\Code\Renderer\simdVload.jl:122 within `test7`
+; Function Attrs: uwtable
+define { {}*, i8 } @julia_test7_3517([8 x i8]* noalias nocapture noundef nonnull align 8 dereferenceable(8) %0, {}* noundef nonnull align 16 dereferenceable(40) %1) #0 {
+top:
+;  @ h:\Code\Renderer\simdVload.jl:127 within `test7`
+; ┌ @ essentials.jl:10 within `length`
+   %2 = bitcast {}* %1 to { i8*, i64, i16, i16, i32 }*
+   %3 = getelementptr inbounds { i8*, i64, i16, i16, i32 }, { i8*, i64, i16, i16, i32 }* %2, i64 0, i32 1
+   %4 = load i64, i64* %3, align 8
+; └
+; ┌ @ int.jl:488 within `<=`
+   %.not20 = icmp eq i64 %4, 0
+; └
+  br i1 %.not20, label %union_move6, label %L9.lr.ph
+
+L9.lr.ph:                                         ; preds = %top
+  %5 = bitcast {}* %1 to float**
+  %6 = load float*, float** %5, align 8
+;  @ h:\Code\Renderer\simdVload.jl:128 within `test7`
+; ┌ @ essentials.jl:13 within `getindex`
+   %7 = load float, float* %6, align 4
+; └
+;  @ h:\Code\Renderer\simdVload.jl within `test7`
+  %value_phi5.peel = fadd float %7, 0.000000e+00
+;  @ h:\Code\Renderer\simdVload.jl:127 within `test7`
+; ┌ @ int.jl:488 within `<=`
+   %exitcond.peel = icmp eq i64 %4, 1
+; └
+  br i1 %exitcond.peel, label %union_move, label %L9
+
+L9:                                               ; preds = %L9, %L9.lr.ph
+  %value_phi22 = phi i64 [ %12, %L9 ], [ 2, %L9.lr.ph ]
+  %8 = phi float [ %value_phi5, %L9 ], [ %value_phi5.peel, %L9.lr.ph ]
+;  @ h:\Code\Renderer\simdVload.jl:128 within `test7`
+; ┌ @ essentials.jl:13 within `getindex`
+   %9 = add nsw i64 %value_phi22, -1
+   %10 = getelementptr inbounds float, float* %6, i64 %9
+   %11 = load float, float* %10, align 4
+; └
+;  @ h:\Code\Renderer\simdVload.jl within `test7`
+  %value_phi5 = fadd float %8, %11
+;  @ h:\Code\Renderer\simdVload.jl:130 within `test7`
+; ┌ @ int.jl:87 within `+`
+   %12 = add nuw nsw i64 %value_phi22, 1
+; └
+;  @ h:\Code\Renderer\simdVload.jl:127 within `test7`
+; ┌ @ int.jl:488 within `<=`
+   %exitcond = icmp eq i64 %value_phi22, %4
+; └
+  br i1 %exitcond, label %union_move, label %L9
+
+post_union_move:                                  ; preds = %union_move6, %union_move
+  %tindex_phi.lcssa31 = phi i8 [ 2, %union_move6 ], [ 1, %union_move ]
+;  @ h:\Code\Renderer\simdVload.jl:133 within `test7`
+  %13 = insertvalue { {}*, i8 } { {}* null, i8 undef }, i8 %tindex_phi.lcssa31, 1
+  ret { {}*, i8 } %13
+
+union_move:                                       ; preds = %L9, %L9.lr.ph
+  %.lcssa.in = phi float [ %value_phi5.peel, %L9.lr.ph ], [ %value_phi5, %L9 ]
+  %14 = bitcast [8 x i8]* %0 to float*
+  store float %.lcssa.in, float* %14, align 8
+  br label %post_union_move
+
+union_move6:                                      ; preds = %top
+  %.sroa_cast15 = bitcast [8 x i8]* %0 to i32*
+  store i32 0, i32* %.sroa_cast15, align 8
+  %.sroa_idx = getelementptr inbounds [8 x i8], [8 x i8]* %0, i64 0, i64 4
+  %.sroa_cast16 = bitcast i8* %.sroa_idx to i32*
+  store i32 0, i32* %.sroa_cast16, align 4
+  br label %post_union_move
+}

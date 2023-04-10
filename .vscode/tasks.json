@@ -25,7 +25,6 @@
                     "-flto",
                     "-fopenmp",
                     "-lbenchmark"
-                    // "-tbb"
                 ]
             },
             "linux": {
@@ -47,7 +46,7 @@
                     "-march=native",
                     "-flto",
                     "-fopenmp",
-                    "-ltbb", // for for_each std::execution::par, https://stackoverflow.com/questions/65866491/why-is-my-parallel-stdfor-each-only-using-1-thread,
+                    "-ltbb",
                     "-lbenchmark"
                 ]
             },
@@ -79,10 +78,9 @@
                     "-O3",
                     "-ffast-math",
                     "-march=native",
-                    "-flto",
+                    // "-flto",
                     "-fopenmp",
                     "-lbenchmark"
-                    // "-tbb"
                 ]
             },
             "linux": {
@@ -99,13 +97,13 @@
                     "${fileDirname}/${fileBasenameNoExtension}",
                     "-Wall",
                     "-Wextra",
-                    "-O3",
-                    "-ffast-math",
+                    "-O2",
+                    // "-ffast-math",
                     "-march=native",
-                    "-flto",
-                    "-fopenmp=libomp",
-                    "-ltbb", // for for_each std::execution::par, https://stackoverflow.com/questions/65866491/why-is-my-parallel-stdfor-each-only-using-1-thread,
-                    "-lbenchmark",
+                    // "-flto",
+                    // "-fopenmp=libomp",
+                    // "-ltbb",
+                    "-lbenchmark"
                 ]
             },
             "problemMatcher": [
@@ -129,7 +127,6 @@
                 "-ltbb",
                 "-Wall",
                 "-Wextra"
-                
             ],
             "options": {
                 "cwd": "${fileDirname}"

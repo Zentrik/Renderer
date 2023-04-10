@@ -1,4 +1,4 @@
-using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers, Tullio, LoopVectorization, StructArrays # Look into https://github.com/AlgebraicJulia/CompTime.jl
+using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers, Tullio, LoopVectorization, StructArrays, SIMD # Look into https://github.com/AlgebraicJulia/CompTime.jl
 import FunctionWrappers: FunctionWrapper
 
 const T = Float32
@@ -202,74 +202,83 @@ glass(ior=3//2) = (ray, n⃗) -> glass(ray, n⃗, ior)
 diffuse(ray, n) = sample_hemisphere(n)
 metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
 
-const initialRecord = Sphere().record
-
-function findSceneIntersection(ray, hittable_list, values, tmin, tmax)
-    record = initialRecord
-    
-    # bestt = tmax
-    # for i in eachindex(hittable_list.Sphere.radius)
-    #     t = intersect(ray, hittable_list.Sphere.centre_x[i], hittable_list.Sphere.centre_y[i], hittable_list.Sphere.centre_z[i], hittable_list.Sphere.radius[i], tmin, bestt)
-    #     if t > 0 # we know t ≤ tmax as t is the result of intersect
-    #         bestt = t
-    #         record = sphere.record
-    #     end
-    # end
-
-    # values = Matrix{T}(undef, 2, length(hittable_list.Sphere))
-    @turbo for i in eachindex(hittable_list.Sphere.radius)
-        # tvalues[i] = intersect(ray.origin, ray.direction, hittable_list.Sphere.centre_x[i], hittable_list.Sphere.centre_y[i], hittable_list.Sphere.centre_z[i], hittable_list.Sphere.radius[i], tmin, tmax)
-        # tvalues[i] = intersect(ray.origin, ray.direction, hittable_list.Sphere.centre_x[i], 0., 1., 4., tmin, tmax)
-        centre_x = hittable_list.Sphere.centre_x[i]
-        centre_y = hittable_list.Sphere.centre_y[i]
-        centre_z = hittable_list.Sphere.centre_z[i]
-        radius = hittable_list.Sphere.radius[i]
-
-        half_b = ray.direction ⋅ ray.origin - (ray.direction.x * centre_x + ray.direction.y * centre_y + ray.direction.z * centre_z)
-        c = ray.origin ⋅ ray.origin + (centre_x^2 + centre_y^2 + centre_z^2) - 2 * (ray.origin.x * centre_x + ray.origin.y * centre_y + ray.origin.z * centre_z) - radius^2
-        quarter_discriminant = half_b^2 - c
-        values[1, i] = quarter_discriminant
-        values[2, i] = half_b
-    end
-
-    # @tullio tvalues[i] := intersect(ray, hittable_list.Sphere.centre_x[i], hittable_list.Sphere.centre_y[i], hittable_list.Sphere.centre_z[i], hittable_list.Sphere.radius[i], tmin, tmax)
-
-    besti = 0
-    for (i, value) in enumerate(eachcol(values))
-        quarter_discriminant = value[1]
-        half_b = value[2]
-        if quarter_discriminant < 0
-            continue
-        else
-            sqrtd = sqrt(quarter_discriminant);
-
-            # Find the nearest root that lies in the acceptable range.
-            root = -half_b - sqrtd
-            if tmin < root < tmax
-                tmax = root
-                besti = i
-            elseif tmin < root + sqrtd * 2 < tmax
-                tmax = root + sqrtd * 2
-                besti = i
-            else 
-                continue
-            end
-        end
-    end
-
-    if besti >= 1
-        record = hittable_list.Sphere[besti].record
-    end
-
-    return (tmax, record)
+@generated function getBits(mask::SIMD.Vec{N, Bool}) where N #This reverses the bits
+    s = """
+    %mask = trunc <$N x i8> %0 to <$N x i1>
+    %res = bitcast <$N x i1> %mask to i$N
+    ret i$N %res
+    """
+    return :(
+        $(Expr(:meta, :inline));
+        Base.llvmcall($s, UInt8, Tuple{SIMD.LVec{N, Bool}}, mask.data)
+    )
 end
 
-function rayColour(ray, hittable_list, depth, values, tmin=1e-4, tmax=Inf)::Spectrum
+function hor_min(x::SIMD.Vec{8, T}) where T
+    @fastmath a = shufflevector(x, Val((4, 5, 6, 7, :undef, :undef, :undef, :undef))) # high half
+    @fastmath b = min(a, x)
+    @fastmath a = shufflevector(b, Val((2, 3, :undef, :undef, :undef, :undef, :undef, :undef)))
+    @fastmath b = min(a, b)
+    @fastmath a = shufflevector(b, Val((1, :undef, :undef, :undef, :undef, :undef, :undef, :undef)))
+    @fastmath b = min(a, b)
+    return b[1]
+end
+
+const initialRecord = Sphere().record
+
+function findSceneIntersectionIntrinsics(ray, hittable_list, tmin, tmax)
+    width = 8
+
+    hitT = SIMD.Vec{width, T}(tmax)
+    laneIndices = SIMD.Vec{width, Int32}(Int32.((1, 2, 3, 4, 5, 6, 7, 8)))
+    minIndex = SIMD.Vec{width, Int32}(0)
+
+    @inbounds @fastmath for lane in LoopVecRange{width}(hittable_list.Sphere)
+        cox = hittable_list.Sphere.centre.x[lane] - ray.origin.x
+        coy = hittable_list.Sphere.centre.y[lane] - ray.origin.y
+        coz = hittable_list.Sphere.centre.z[lane] - ray.origin.z
+
+        neg_half_b = ray.direction.x * cox + ray.direction.y * coy 
+        neg_half_b += ray.direction.z * coz
+
+        c = cox*cox + coy*coy + coz*coz 
+        c -= hittable_list.Sphere.radius[lane] * hittable_list.Sphere.radius[lane]
+
+        quarter_discriminant = neg_half_b^2 - c
+        isDiscriminantPositive = quarter_discriminant > 0
+
+        if any(isDiscriminantPositive)
+            sqrtd = sqrt(quarter_discriminant) # When using fastmath, negative values just give 0
+    
+            root = neg_half_b - sqrtd
+            root2 = neg_half_b + sqrtd
+
+            t = vifelse(root > tmin, root, root2)
+
+            newMinT = isDiscriminantPositive & (tmin < t) & (t < hitT)
+            hitT = vifelse(newMinT, t, hitT)
+            minIndex = vifelse(newMinT, laneIndices, minIndex)
+        end
+
+        laneIndices += SIMD.Vec{width, Int32}(Int32(8))
+    end    
+
+    minHitT = hor_min(hitT)
+
+    if minHitT < tmax
+        i = minIndex[trailing_zeros(getBits(hitT == minHitT)) + 1]
+        return minHitT, hittable_list.Sphere[i].record
+    end
+
+    return minHitT, initialRecord
+end
+
+function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
     if depth == 0
         return zeros(Spectrum)
     end
 
-    t, record = findSceneIntersection(ray, hittable_list, values, tmin, tmax)
+    t, record = findSceneIntersection(ray, hittable_list, tmin, tmax)
 
     if t == tmax # nothing hit
         return world(ray)
@@ -278,7 +287,7 @@ function rayColour(ray, hittable_list, depth, values, tmin=1e-4, tmax=Inf)::Spec
         direction, colour = record(position, ray) # scatter right now only depends on ray direction so we don't need to advance it?
 
         ray = Ray(position, direction)
-        return rayColour(ray, hittable_list, depth - 1, values) .* colour
+        return rayColour(ray, hittable_list, depth - 1) .* colour
     end
 end
 
@@ -314,7 +323,7 @@ function scene_random_spheres()
     return HittableList #HittableDict(HittableList) #SVector{length(HittableList), Sphere}(HittableList)
 end
 
-function renderRay(HittableList, maxDepth, pixel_position, camera, values)
+function renderRay(HittableList, maxDepth, pixel_position, camera)
     random_pixel_position = pixel_position + rand() * camera.right + rand() * camera.down
 
     defocus_random = camera.lens_radius * sample_circle()
@@ -322,7 +331,7 @@ function renderRay(HittableList, maxDepth, pixel_position, camera, values)
 
     ray = Ray(camera.pinhole_location + defocus_offset, normalize(random_pixel_position - camera.pinhole_location - defocus_offset))
 
-    return rayColour(ray, HittableList, maxDepth, values)
+    return rayColour(ray, HittableList, maxDepth)
 end
 
 function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=:ThreadsX)
