@@ -5,4 +5,4 @@ const SUITE = BenchmarkGroup()
 
 SUITE["RayTracingInOneWeekend"] = BenchmarkGroup(["test"])
 
-SUITE["RayTracingInOneWeekend"]["claforte"] = @benchmarkable Renderer.Slow.render!(x..., samples_per_pixel=10, parallel=false) setup=(x=Renderer.Slow.setup())
+SUITE["RayTracingInOneWeekend"]["claforte"] = @benchmarkable Renderer.Slow.render!(x..., samples_per_pixel=5, parallel=false) setup=(x=Renderer.Slow.setup(1920/2))

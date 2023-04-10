@@ -268,12 +268,19 @@ end
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
 
-function claforte(print=false)
+function setup(resolution=1920/2)
     HittableList = scene_random_spheres();
     scene = hittable_list(HittableList);
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
+    spectrum_img = zeros(Spectrum, reverse(imagesize(resolution, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=1000)
+
+    return spectrum_img, scene, camera
+end
+
+function claforte(print=false)
+    spectrum_img, HittableList, camera = setup(1920)
+
+    @time render!(spectrum_img, HittableList, camera, samples_per_pixel=1000)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -282,11 +289,9 @@ function claforte(print=false)
 end
 
 function run(print=false)
-    HittableList = scene_random_spheres();
-    scene = hittable_list(HittableList);
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    render!(spectrum_img, scene, camera, samples_per_pixel=10)
+    spectrum_img, HittableList, camera = setup()
+
+    render!(spectrum_img, HittableList, camera, samples_per_pixel=10)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
@@ -295,10 +300,8 @@ function run(print=false)
 end
 
 function test(print=false)
-    scene = scene_random_spheres();
-    HittableList = hittable_list(scene);
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/10, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    (spectrum_img, HittableList, camera) = setup(1920/10)
+
     render!(spectrum_img, HittableList, camera, samples_per_pixel=5)
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
@@ -309,11 +312,9 @@ end
 
 using Profile, PProf
 function profile()
-    HittableList = scene_random_spheres();
-    scene = hittable_list(HittableList);
-    spectrum_img = zeros(Spectrum, reverse(imagesize(10, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    render!(spectrum_img, scene, camera, samples_per_pixel=10)
+    spectrum_img, HittableList, camera = setup(10)
+
+    render!(spectrum_img, HittableList, camera, samples_per_pixel=10)
 
     Profile.Allocs.clear(); 
 
@@ -324,25 +325,14 @@ end
 
 using BenchmarkTools
 function benchmark(;print=false, parallel=true)
-    HittableList = scene_random_spheres();
-    scene = hittable_list(HittableList);
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=10, parallel=$parallel))
+    spectrum_img, HittableList, camera = setup()
+
+    display(@benchmark render!($spectrum_img, $HittableList, $camera, samples_per_pixel=10, parallel=$parallel))
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
     end
     return nothing
-end
-
-function setup()
-    HittableList = scene_random_spheres();
-    scene = hittable_list(HittableList);
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-
-    return (spectrum_img, scene, camera)
 end
 
 # save("render.png", rgb_img)
