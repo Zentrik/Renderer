@@ -6,6 +6,8 @@ const Point = SVector{3, T} # We use define Float64 so we dont have points of di
 # we dont do const T = Float64 as that makes Point(...) slow in sample_hemisphere and world() slow. # seems fine now? i think splitting sample_hemisphere into sample_sphere has helpled.
 const Spectrum = SVector{3, T}
 
+const N = 8 # vector width
+
 @with_kw struct Ray @deftype Point
     origin = zeros(Point)
     direction = Point(0, 1, 0)
@@ -35,47 +37,44 @@ end
     Sphere::T = []
 end
 
+function StructArrays.staticschema(::Type{Point})
+    # Define the desired names and eltypes of the "fields"
+    return NamedTuple{(:x, :y, :z), fieldtypes(Point)...}
+end
+
+StructArrays.component(m::Point, key::Symbol) = getproperty(m, key)
+StructArrays.createinstance(::Type{Point}, args...) = Point(args)
+
 imagesize(height, aspectRatio) = round.(Int, (height, height / aspectRatio))
 
 @with_kw struct Camera{T<:Real} @deftype Point
-    right = Point(2 * 16//9, 0, 0) // 400
-	down = - Point(0, 0, 2) / imagesize(nx, 16//9)[2]
+    right
+	down
 
-    upper_left_corner = Point(-16//9, 1, 1)
-	pinhole_location = zeros(Point)
+    upper_left_corner
+	pinhole_location
 
-    lens_radius::T = 0
-
-    function Camera(nx=400, ny=imagesize(nx, 16/9)[2], camera_height=2, camera_centre=Point(0, 1, 0), lens_radius::T=0, focus_distance=1)  where T
-        aspect_ratio = nx/ny
-
-        camera_height *= focus_distance
-        right = Point(camera_height * aspect_ratio, 0, 0) / nx
-        down = - Point(0, 0, camera_height) / ny
-        upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
-        pinhole_location = camera_centre - Point(0, focus_distance, 0)
-    
-        return new{T}(right, down, upper_left_corner, pinhole_location, lens_radius)
-    end
-    function Camera(nx=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Point(0, 0, 0), lookat=Point(0, 1, 0), up=Point(0, 0, 1), vfov=2atand(1), lens_radius::T=0, focus_distance=1) where T
-        aspect_ratio = nx/ny
-
-        camera_height = 2 * tand(vfov / 2) * focus_distance
-        camera_width = camera_height * aspect_ratio
-
-        w = normalize(lookat - pinhole_location)
-        u = normalize(w × up)
-        v = w × u
-
-        right = u * camera_width / nx 
-        down = v * camera_height / ny
-
-        camera_centre = pinhole_location + w * focus_distance
-        upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
-
-        return new{T}(right, down, upper_left_corner, pinhole_location, lens_radius)
-    end
+    lens_radius::T
 end
+function Camera(nx=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Point(0, 0, 0), lookat=Point(0, 1, 0), up=Point(0, 0, 1), vfov=2atand(1), lens_radius=0, focus_distance=1)
+    aspect_ratio = nx/ny
+
+    camera_height = 2 * tand(vfov / 2) * focus_distance
+    camera_width = camera_height * aspect_ratio
+
+    w = normalize(lookat - pinhole_location)
+    u = normalize(w × up)
+    v = w × u
+
+    right = u * camera_width / nx 
+    down = v * camera_height / ny
+
+    camera_centre = pinhole_location + w * focus_distance
+    upper_left_corner = camera_centre - right * nx / 2 - down * ny / 2
+
+    return Camera(right, down, upper_left_corner, pinhole_location, lens_radius)
+end
+
 pixelWorldPosition(camera, index) = camera.upper_left_corner + (index[2] - 1) * camera.right + (index[1] - 1) * camera.down
 
 pixelWorldPosition(camera, x, y) = camera.upper_left_corner + (y - 1) * camera.right + (x - 1) * camera.down
@@ -83,55 +82,11 @@ pixelWorldPosition(camera, x, y) = camera.upper_left_corner + (y - 1) * camera.r
 # using MuladdMacro
 # @inbounds @inline @muladd StaticArrays.dot(v0::Point, v1::Point) = v0.x * v1.x + v0.y * v1.y + v0.z * v1.z
 
-norm2(x) = x ⋅ x
+@fastmath norm2(x) = x ⋅ x
 
-@inline @fastmath function intersect(ray, sphere::Sphere, tmin, tmax) # Relies on norm(ray.direction) == 1 # @inline together gives 4x speedup for render. @fastmath gives 2% speedup?
-    origin_to_centre = ray.origin - sphere.centre
-    half_b = ray.direction ⋅ origin_to_centre
-    c = origin_to_centre ⋅ origin_to_centre - sphere.radius^2
-    quarter_discriminant = half_b^2 - c
-    if quarter_discriminant < 0
-        return -one(c)
-    else
-        sqrtd = sqrt(quarter_discriminant);
-
-        # Find the nearest root that lies in the acceptable range.
-        root = -half_b - sqrtd
-        if tmin < root < tmax
-            return root
-        elseif tmin < root + sqrtd * 2 < tmax
-            return root + sqrtd * 2
-        else 
-            return -one(c)
-        end
-    end
-end
-
-@inline @fastmath function intersect(origin, direction, centre_x, centre_y, centre_z, radius, tmin, tmax) # Relies on norm(ray.direction) == 1 # @inline together gives 4x speedup for render. @fastmath gives 2% speedup?
-    # origin_to_centre = ray.origin - centre
-    half_b = direction ⋅ origin - (direction.x * centre_x + direction.y * centre_y + direction.z * centre_z)
-    c = origin ⋅ origin + (centre_x^2 + centre_y^2 + centre_z^2) - 2 * (origin.x * centre_x + origin.y * centre_y + origin.z * centre_z) - radius^2
-    quarter_discriminant = half_b^2 - c
-    if quarter_discriminant < 0
-        return -one(c)
-    else
-        sqrtd = sqrt(quarter_discriminant);
-
-        # Find the nearest root that lies in the acceptable range.
-        root = -half_b - sqrtd
-        if tmin < root < tmax
-            return root
-        elseif tmin < root + sqrtd * 2 < tmax
-            return root + sqrtd * 2
-        else 
-            return -one(c)
-        end
-    end
-end
-
-function world(ray)
+function world_colour(ray)
     interp = (ray.direction.z + 1) / 2
-    return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0) # Spectrum{3, Float64} instead of Spectrum{3, T} saves 1mb, 0.2s for nx=50. 
+    return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0)
 end
 
 function sample_circle()
@@ -156,7 +111,7 @@ function sample_hemisphere(n⃗)
     end
 end
 
-function reflect(ray, n⃗, fuzz=0)
+@fastmath function reflect(ray, n⃗, fuzz=0)
     direction = ray.direction - 2(ray.direction ⋅ n⃗) * n⃗
 
     if fuzz ≉ 0
@@ -167,18 +122,18 @@ function reflect(ray, n⃗, fuzz=0)
     return normalize(direction)
 end
 
-function shick(cosθ, ior_ratio)
+@fastmath function shick(cosθ, ior_ratio)
     r0 = ((1 - ior_ratio) / (1 + ior_ratio))^2
     return r0 = (1 - r0) * (1 - cosθ)^5
 end
 
-function glass(ray, n⃗, ior)
+@fastmath function glass(ray, n⃗, ior)
     air_ior = 1
 
     cosθ = - ray.direction ⋅ n⃗
     into = cosθ > 0
     # cosθ = min(cosθ, one(T))
-    sinθ = sqrt(1 - cosθ^2)
+    sinθ = sqrt(max(1 - cosθ^2, zero(T)))
     
     if into
         ior_ratio = air_ior / ior
@@ -192,7 +147,7 @@ function glass(ray, n⃗, ior)
         return normalize(reflect(ray, n⃗))
     else
         Rperp = ior_ratio * (ray.direction + cosθ * n⃗)
-        Rpar = - sqrt(1 - norm2(Rperp)) * n⃗
+        Rpar = - sqrt(max(1 - norm2(Rperp), zero(T))) * n⃗
 
         return normalize(Rperp + Rpar)
     end
@@ -226,14 +181,27 @@ end
 
 const initialRecord = Sphere().record
 
-function findSceneIntersectionIntrinsics(ray, hittable_list, tmin, tmax)
-    width = 8
+@generated function sext(::Type{T}, x::SIMD.Vec{N, Bool}) where {N,T}
+    t = SIMD.Intrinsics.llvm_type(T)
+    s = """
+    %2 = trunc <$N x i8> %0 to <$N x i1>
+    %3 = sext  <$N x i1> %2 to <$N x $t>
+    ret <$N x $t> %3
+    """
+    return :( $(Expr(:meta,:inline)); Vec(Base.llvmcall($s, SIMD.LVec{$N,$T}, Tuple{SIMD.LVec{$N,Bool}}, x.data)) )
+end
 
-    hitT = SIMD.Vec{width, T}(tmax)
-    laneIndices = SIMD.Vec{width, Int32}(Int32.((1, 2, 3, 4, 5, 6, 7, 8)))
-    minIndex = SIMD.Vec{width, Int32}(0)
+function SIMD.any(x::SIMD.Vec{8, Bool})
+    y = SIMD.Intrinsics.bitcast(SIMD.LVec{8, Float32}, sext(Int32, x).data)
+    return ccall("llvm.x86.avx.vtestz.ps.256", llvmcall, Int32, (SIMD.LVec{8, Float32}, SIMD.LVec{8, Float32}), y, y) == 0
+end
 
-    @inbounds @fastmath for lane in LoopVecRange{width}(hittable_list.Sphere)
+@inbounds @fastmath function findSceneIntersection(ray, hittable_list, tmin, tmax)
+    hitT = SIMD.Vec{N, T}(tmax)
+    laneIndices = SIMD.Vec{N, Int32}(Int32.((1, 2, 3, 4, 5, 6, 7, 8)))
+    minIndex = SIMD.Vec{N, Int32}(0)
+
+    @inbounds @fastmath for lane in LoopVecRange{N}(hittable_list.Sphere)
         cox = hittable_list.Sphere.centre.x[lane] - ray.origin.x
         coy = hittable_list.Sphere.centre.y[lane] - ray.origin.y
         coz = hittable_list.Sphere.centre.z[lane] - ray.origin.z
@@ -241,7 +209,8 @@ function findSceneIntersectionIntrinsics(ray, hittable_list, tmin, tmax)
         neg_half_b = ray.direction.x * cox + ray.direction.y * coy 
         neg_half_b += ray.direction.z * coz
 
-        c = cox*cox + coy*coy + coz*coz 
+        c = cox*cox + coy*coy 
+        c += coz*coz 
         c -= hittable_list.Sphere.radius[lane] * hittable_list.Sphere.radius[lane]
 
         quarter_discriminant = neg_half_b^2 - c
@@ -260,7 +229,7 @@ function findSceneIntersectionIntrinsics(ray, hittable_list, tmin, tmax)
             minIndex = vifelse(newMinT, laneIndices, minIndex)
         end
 
-        laneIndices += SIMD.Vec{width, Int32}(Int32(8))
+        laneIndices += N
     end    
 
     minHitT = hor_min(hitT)
@@ -273,26 +242,28 @@ function findSceneIntersectionIntrinsics(ray, hittable_list, tmin, tmax)
     return minHitT, initialRecord
 end
 
-function rayColour(ray, hittable_list, depth, tmin=1e-4, tmax=Inf)::Spectrum
-    if depth == 0
-        return zeros(Spectrum)
+@fastmath function rayColour(ray, world, depth, tmin=1e-4, tmax=Inf)::Spectrum
+    accumulated_attenuation = ones(Spectrum)
+
+    for _ in 1:depth
+        t, record = findSceneIntersection(ray, world, tmin, tmax)
+
+        if t == tmax # nothing hit
+            # @assert all(world_color(r) .>= 0)
+            return accumulated_attenuation .* world_colour(ray)
+        else
+            position = ray(t)
+            direction, colour = record(position, ray) # scatter right now only depends on ray direction so we don't need to advance it?
+
+            ray = Ray(position, direction)
+            accumulated_attenuation = accumulated_attenuation .* colour
+        end
     end
 
-    t, record = findSceneIntersection(ray, hittable_list, tmin, tmax)
-
-    if t == tmax # nothing hit
-        return world(ray)
-    else
-        position = ray(t)
-        direction, colour = record(position, ray) # scatter right now only depends on ray direction so we don't need to advance it?
-
-        ray = Ray(position, direction)
-        return rayColour(ray, hittable_list, depth - 1) .* colour
-    end
+    return zeros(Spectrum)
 end
 
 function scene_random_spheres()
-	# HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
     HittableList = [Sphere([0, 0, -1000], 1000, [.5, .5, .5], diffuse)]
 
 	for a in -11:10, b in -11:10
@@ -320,10 +291,14 @@ function scene_random_spheres()
 	push!(HittableList, Sphere([0,0,1], 1, ones(Spectrum), glass()))
 	push!(HittableList, Sphere([-4,0,1], 1, [0.4,0.2,0.1], diffuse))
 	push!(HittableList, Sphere([4,0,1], 1, [0.7,0.6,0.5], metal()))
-    return HittableList #HittableDict(HittableList) #SVector{length(HittableList), Sphere}(HittableList)
+    
+    
+    append!(HittableList, repeat([Sphere(zeros(Point), 0)], (N - mod1(length(HittableList), N))))
+    tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
+    return Scene(tmp);
 end
 
-function renderRay(HittableList, maxDepth, pixel_position, camera)
+@fastmath function renderRay(HittableList, maxDepth, pixel_position, camera)
     random_pixel_position = pixel_position + rand() * camera.right + rand() * camera.down
 
     defocus_random = camera.lens_radius * sample_circle()
@@ -339,10 +314,9 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
         ThreadsX.map!(index -> sum(_ -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
     elseif parallel == false
         # map!(index -> sum(_ -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
-        values = Matrix{T}(undef, 2, length(HittableList.Sphere))
         for index in CartesianIndices(img)
             for _ in 1:samples_per_pixel
-                img[index] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera, values)
+                img[index] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera)
             end
             img[index] /= samples_per_pixel  
         end
@@ -375,53 +349,68 @@ end
 # @code_warntype findSceneIntersection(Ray(), scene_random_spheres(), 1e-4, Inf);
 # @code_warntype intersect(Ray(), scene_random_spheres()[1], 1e-4, Inf);
 
-function run(;print=false, parallel=:ThreadsX)
+spectrumToRGB(spectrum_img) = map(x -> RGB(sqrt.(x)...), spectrum_img)
+
+function setup(resolution=1920/2)
     HittableList = scene_random_spheres();
-    scene = Scene(Tuple(HittableList));
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
+    spectrum_img = zeros(Spectrum, reverse(imagesize(resolution, 16//9))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+
+    return HittableList, spectrum_img, camera
+end
+
+function run(parallel=:ThreadsX)
+    scene, spectrum_img, camera = setup()
+
     @time render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
-    rgb_img = map(x -> RGB(x...), spectrum_img)
-    if print
-        rgb_img |> display
-    end
-    return rgb_img
+    return spectrumToRGB(spectrum_img)
+end
+
+function test(parallel=:ThreadsX)
+    scene, spectrum_img, camera = setup(1920/10)
+
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=5, parallel=parallel)
+    return spectrumToRGB(spectrum_img)
+end
+
+function claforte(parallel=:ThreadsX)
+    scene, spectrum_img, camera = setup(1920)
+
+    @time render!(spectrum_img, scene, camera, samples_per_pixel=1000, parallel=parallel)
+    return spectrumToRGB(spectrum_img)
+end
+
+function profview(parallel=:ThreadsX)
+    scene, spectrum_img, camera = setup()
+
+    @profview render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
+    return spectrumToRGB(spectrum_img)
+end
+
+function profview_allocs(parallel=:ThreadsX)
+    scene, spectrum_img, camera = setup()
+
+    @profview_allocs render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
+    return spectrumToRGB(spectrum_img)
 end
 
 using Profile, PProf
 function profile()
-    HittableList = scene_random_spheres();
-    scene = Scene(HittableList);
-    spectrum_img = zeros(Spectrum, reverse(imagesize(10, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    render!(spectrum_img, scene, camera, samples_per_pixel=10)
+    HittableList, spectrum_img, camera = setup(10)
+
+    render!(spectrum_img, HittableList, camera, samples_per_pixel=10)
 
     Profile.Allocs.clear(); 
 
-    @time Profile.Allocs.@profile sample_rate=1 render!(spectrum_img, scene, camera, parallel=false)
+    Profile.Allocs.@profile sample_rate=1 render!(spectrum_img, scene, camera)
 
     PProf.Allocs.pprof(from_c=false, webport=8080)
 end
 
-function profview(;print=false, parallel=:ThreadsX)
-    HittableList = scene_random_spheres();
-    scene = Scene(Tuple(HittableList));
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    @profview render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
-    rgb_img = map(x -> RGB(x...), spectrum_img)
-    if print
-        rgb_img |> display
-    end
-    return rgb_img
-end
-
 using BenchmarkTools
 function benchmark(;print=false, parallel=:ThreadsX)
-    HittableList = scene_random_spheres();
-    scene = Scene(Tuple(HittableList));
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/2, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    scene, spectrum_img, camera = setup()
+
     display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=10, parallel=$parallel))
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
@@ -429,107 +418,3 @@ function benchmark(;print=false, parallel=:ThreadsX)
     end
     return nothing
 end
-
-@with_kw struct SphereTest2
-    centre_x::T
-    centre_y::T
-    centre_z::T
-    radius::T
-    record::HitRecord
-end
-
-function quickBenchmark(;print=false, parallel=:ThreadsX)
-    HittableList = scene_random_spheres();
-    spheres = SphereTest2[]
-    for sphere in HittableList
-        push!(spheres, SphereTest2(sphere.centre.x, sphere.centre.y, sphere.centre.z, sphere.radius, sphere.record))
-    end
-    scene = Scene(StructArray(spheres));
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/10, 16//9))...)
-    # spectrum_img = zeros(reverse(imagesize(1920/10, 16//9))..., 3)
-    # spectrum_img = StructArray(spectrum_img)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=5, parallel=$parallel))
-    rgb_img = map(x -> RGB(x...), spectrum_img)
-    if print
-        rgb_img |> display
-    end
-    return nothing
-end
-
-function test(;print=true, parallel=false)
-    HittableList = scene_random_spheres();
-    spheres = SphereTest2[]
-    for sphere in HittableList
-        push!(spheres, SphereTest2(sphere.centre.x, sphere.centre.y, sphere.centre.z, sphere.radius, sphere.record))
-    end
-    scene = Scene(StructArray(spheres));
-
-    # scene = Scene(Tuple(HittableList));
-
-    spectrum_img = zeros(Spectrum, reverse(imagesize(1920/10, 16//9))...)
-    # spectrum_img = zeros(reverse(imagesize(1920/10, 16//9))..., 3)
-    # spectrum_img = StructArray(spectrum_img)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-    render!(spectrum_img, scene, camera, samples_per_pixel=5, parallel=parallel)
-    rgb_img = map(x -> RGB(x...), spectrum_img)
-    if print
-        rgb_img |> display
-    end
-    return nothing
-end
-
-using JET
-# @report_opt run(parallel=false)
-
-HittableList = scene_random_spheres();
-spheres = SphereTest2[]
-for sphere in HittableList
-    push!(spheres, SphereTest2(sphere.centre.x, sphere.centre.y, sphere.centre.z, sphere.radius, sphere.record))
-end
-scene = Scene(StructArray(spheres));
-# scene = Scene(Tuple(HittableList));
-spectrum_img = zeros(Spectrum, reverse(imagesize(1920, 16//9))...)
-camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
-@report_opt render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=false)
-
-# HittableList = scene_random_spheres();
-# spheres = SphereTest2[]
-# for sphere in HittableList
-#     push!(spheres, SphereTest2(sphere.centre.x, sphere.centre.y, sphere.centre.z, sphere.radius, sphere.record))
-# end
-# scene = Scene(StructArray(spheres));
-
-# ray = Ray()
-# intersect(ray, scene.Sphere.centre_x[1], scene.Sphere.centre_y[1], scene.Sphere.centre_z[1], scene.Sphere.radius[1], tmin, tmax)
-# t, hitrecord = findSceneIntersection(ray, scene, 0, Inf)
-
-# hittable_list = Scene(Tuple(HittableList));
-
-# intersect(ray, hittable_list.Sphere[1], tmin, tmax)
-
-# record = initialRecord
-
-# tmax = Inf
-# for sphere in hittable_list.Sphere
-#     t = intersect(ray, sphere, tmin, tmax)
-#     if t > 0 # we know t ≤ tmax as t is the result of intersect
-#         tmax = t
-#         record = sphere.record
-#     end
-# end
-
-# tmax
-# record
-
-
-
-# @benchmark findSceneIntersection(ray, scene, 1e-4, Inf) setup=(ray=Ray(); scene=Scene(scene_random_spheres()))
-# @benchmark intersect(ray, sphere, 1e-4, Inf) setup=(ray=Ray(); sphere=Sphere())
-
-# save("render.png", rgb_img)
-# save("render.exr", rgb_img)
-
-# using ImageContrastAdjustment
-# adjust_histogram(rgb_img, GammaCorrection(gamma=1/2))
-# map(x -> RGB(x.^(1/2)...), spectrum_img)

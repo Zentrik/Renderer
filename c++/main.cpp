@@ -84,6 +84,13 @@ hittable_list random_scene() {
 int main() {
     // IMAGE
 
+#ifdef PROFVIEW
+    const auto aspect_ratio = 16. / 9.;
+    const int image_width = 1920 / 2;
+    const int image_height = static_cast<int>(image_width / aspect_ratio);
+    const int samples_per_pixel = 10;
+    const int max_depth = 16;
+#else
 #ifdef CLAFORTE
     const auto aspect_ratio = 16. / 9.;
     const int image_width = 1920;
@@ -103,6 +110,7 @@ int main() {
     const int image_height = static_cast<int>(image_width / aspect_ratio);
     const int samples_per_pixel = 50;
     const int max_depth = 10;
+#endif
 #endif
 #endif
 
