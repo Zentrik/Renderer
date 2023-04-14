@@ -1,6 +1,8 @@
 # This tries to stay faithful to the book's code
 
 using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers, SIMD, StructArrays, Polyester
+using Expronicon.ADT: @adt
+using Expronicon
 import FunctionWrappers: FunctionWrapper
 
 const T = Float32
@@ -17,9 +19,23 @@ const Spectrum = SVector{3, T}
 end
 @inline @fastmath (ray::Ray)(t) = ray.origin + t * ray.direction
 
-struct Material
-    attenuation::Spectrum
-    scatter::FunctionWrapper{Point, Tuple{Ray, Point}}
+# struct Material
+#     attenuation::Spectrum
+#     scatter::FunctionWrapper{Point, Tuple{Ray, Point}}
+# end
+
+@adt Material begin
+    struct Lambertian
+        attenuation::Spectrum = ones(Spectrum)
+    end
+    struct Dielectric
+        attenuation::Spectrum = ones(Spectrum)
+        ior::T = 3//2
+    end
+    struct Metal
+        attenuation::Spectrum = ones(Spectrum)
+        fuzz::T = 0
+    end
 end
 
 struct hit_record
@@ -36,7 +52,7 @@ abstract type Primitive end
     radius::T
     material::Material
 
-    Sphere(centre=zeros(Point), radius=1//2, attenuation=ones(Spectrum), scatter=lambertian) = new(centre, radius, Material(attenuation, scatter))
+    Sphere(centre=zeros(Point), radius=1//2, material=Material.Lambertian()) = new(centre, radius, material)
 end
 
 @fastmath sphere_normal(sphere, position) = (position - sphere.centre) / sphere.radius
@@ -282,10 +298,16 @@ end
             # @assert all(world_color(r) .>= 0)
             return accumulated_attenuation .* world_color(r)
         else
-            # @assert norm(record.normal) ≈ 1
-            direction = record.material.scatter(r, record.normal)
-            # @assert norm(direction) ≈ 1
-            attenuation = record.material.attenuation
+            # # @assert norm(record.normal) ≈ 1
+            # direction = record.material.scatter(r, record.normal)
+            # # @assert norm(direction) ≈ 1
+            # attenuation = record.material.attenuation
+
+            @fastmath @inline (direction, attenuation) = @match record.material begin
+                Material.Lambertian(attenuation) => (lambertian(r, record.normal), attenuation)
+                Material.Dielectric(attenuation, ior) => (glass(r, record.normal, ior), attenuation)
+                Material.Metal(attenuation, fuzz) => (reflect(r, record.normal, fuzz), attenuation)
+            end
 
             r = Ray(record.p, direction)
             accumulated_attenuation = accumulated_attenuation .* attenuation
@@ -297,7 +319,7 @@ end
 
 function scene_random_spheres()
 	# HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
-    HittableList = [Sphere([0, 0, -1000], 1000, [.5, .5, .5], lambertian)]
+    HittableList = [Sphere([0, 0, -1000], 1000, Material.Lambertian([.5, .5, .5]))]
 
 	for a in -11:10, b in -11:10
 		choose_mat = rand()
@@ -309,21 +331,21 @@ function scene_random_spheres()
 		if choose_mat < 4//5
 			# lambertian
 			albedo = rand(Spectrum) .* rand(Spectrum)
-			push!(HittableList, Sphere(center, 1//5, albedo, lambertian))
+			push!(HittableList, Sphere(center, 1//5, Material.Lambertian(albedo)))
 		elseif choose_mat < 95//100
 			# metal
 			albedo = rand(Spectrum) / 2 .+ 1/2
 			fuzz = rand() * 5
-			push!(HittableList, Sphere(center, 0.2, albedo, metal(fuzz)))
+			push!(HittableList, Sphere(center, 0.2, Material.Metal(albedo, fuzz)))
 		else
 			# glass
-			push!(HittableList, Sphere(center, 0.2, ones(Spectrum), glass()))
+			push!(HittableList, Sphere(center, 0.2, Material.Dielectric()))
 		end
 	end
 
-	push!(HittableList, Sphere([0,0,1], 1, ones(Spectrum), glass()))
-	push!(HittableList, Sphere([-4,0,1], 1, [0.4,0.2,0.1], lambertian))
-	push!(HittableList, Sphere([4,0,1], 1, [0.7,0.6,0.5], metal()))
+	push!(HittableList, Sphere([0,0,1], 1, Material.Dielectric()))
+	push!(HittableList, Sphere([-4,0,1], 1, Material.Lambertian([0.4,0.2,0.1])))
+	push!(HittableList, Sphere([4,0,1], 1, Material.Metal([0.7,0.6,0.5], 0)))
 
     append!(HittableList, repeat([Sphere(zeros(Point), 0)], (N - mod1(length(HittableList), N))))
     tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))::StructVector{Sphere, NamedTuple{(:centre, :radius, :material), Tuple{StructVector{SVector{3, Float32}, NamedTuple{(:x, :y, :z), Tuple{Vector{Float32}, Vector{Float32}, Vector{Float32}}}, Int64}, Vector{Float32}, Vector{Material}}}, Int64}

@@ -2,7 +2,7 @@
 
 julia_version = "1.9.0-rc2"
 manifest_format = "2.0"
-project_hash = "18976cc7d5067613f7027f511a3f217c8cc8a43d"
+project_hash = "8b60fb2934f04a992e01a43dac0d15d0a89bf544"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -338,6 +338,12 @@ deps = ["Artifacts", "JLLWrappers", "Libdl", "Pkg"]
 git-tree-sha1 = "bad72f730e9e91c08d9427d5e8db95478a3c323d"
 uuid = "2e619515-83b5-522b-bb60-26c02a35a201"
 version = "2.4.8+0"
+
+[[deps.Expronicon]]
+deps = ["MLStyle", "Pkg", "TOML"]
+git-tree-sha1 = "07242f7674b708c7579c96c47c78debd67042b90"
+uuid = "6b7a57c9-7cc1-4fdf-b7f5-e857abae3636"
+version = "0.10.2"
 
 [[deps.FFTViews]]
 deps = ["CustomUnitRanges", "FFTW"]
@@ -837,6 +843,11 @@ deps = ["Artifacts", "IntelOpenMP_jll", "JLLWrappers", "LazyArtifacts", "Libdl",
 git-tree-sha1 = "2ce8695e1e699b68702c03402672a69f54b8aca9"
 uuid = "856f044c-d86e-5d09-b602-aeab76dc8ba7"
 version = "2022.2.0+0"
+
+[[deps.MLStyle]]
+git-tree-sha1 = "bc38dff0548128765760c79eb7388a4b37fae2c8"
+uuid = "d8e11817-5142-5d16-987a-aa16d5891078"
+version = "0.4.17"
 
 [[deps.MacroTools]]
 deps = ["Markdown", "Random"]
