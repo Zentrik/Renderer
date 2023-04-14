@@ -2,5 +2,5 @@
 #define MULTITHREAD // Broken on Visual Studio
 // tbb broken on windows?
 
-#define CLAFORTE
-// #define PROFVIEW
+// #define CLAFORTE
+#define PROFVIEW

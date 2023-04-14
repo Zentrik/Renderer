@@ -4,7 +4,7 @@ using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrapper
 import FunctionWrappers: FunctionWrapper
 
 const T = Float32
-const N = 8
+const N = 8 # vector width
 
 const Point = SVector{3, T} # We use define Float64 so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
 # we dont do const T = Float64 as that makes Point(bla) slow in sample_hemisphere and world() slow. # seems fine now? i think splitting sample_hemisphere into sample_sphere has helpled.
@@ -117,10 +117,15 @@ end
     end
 end
 
+@inline @fastmath function random_on_unit_sphere_surface()
+    tmp = random_in_unit_sphere()
+    return normalize_fast(tmp)
+end
+
 @fastmath function reflect(ray, n⃗, fuzz=0)
     direction = ray.direction - 2(ray.direction ⋅ n⃗) * n⃗
 
-    if fuzz ≉ 0 
+    if fuzz ≉ 0
         direction += fuzz * random_in_unit_sphere()
     end
 
@@ -164,9 +169,8 @@ end
 @inline @fastmath normalize_fast(x) = x * (1 / sqrt(norm2(x)))
 
 @fastmath function lambertian(ray, n⃗) 
-    random = random_in_unit_sphere()
-    normalised_random = normalize_fast(random)
-    vector = n⃗ + normalised_random
+    random = random_on_unit_sphere_surface()
+    vector = n⃗ + random
 
     if all(vector .≈ 0)
         vector = n⃗
@@ -287,6 +291,7 @@ end
             accumulated_attenuation = accumulated_attenuation .* attenuation
         end
     end
+
     return zeros(Spectrum)
 end
 
@@ -338,7 +343,7 @@ end
 
 function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=true)
     if parallel == :ThreadsX
-        ThreadsX.map!(index -> sum(sample -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
+        ThreadsX.map!(index -> sum(_ -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
     elseif parallel == true
         # Threads.@threads for index in CartesianIndices(img)
         #     @inbounds for sample in 1:samples_per_pixel
@@ -469,8 +474,7 @@ function setup(resolution=1920/2)
     return HittableList, spectrum_img, camera
 end
 
-
-function prod(parallel=true)
+function production(parallel=true)
     scene, spectrum_img, camera = setup()
 
     @time render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
@@ -520,9 +524,9 @@ end
 
 using BenchmarkTools
 function benchmark(;print=false, parallel=true)
-    scene, spectrum_img, camera = setup(1920/4)
+    scene, spectrum_img, camera = setup()
 
-    display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=10, parallel=$parallel))
+    display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel))
     rgb_img = map(x -> RGB(x...), spectrum_img)
     if print
         rgb_img |> display
