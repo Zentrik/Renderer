@@ -1,8 +1,7 @@
 # This tries to stay faithful to the book's code
 
-using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers, SIMD, StructArrays, Polyester
+using Parameters, StaticArrays, LinearAlgebra, Images, ThreadsX, FunctionWrappers, SIMD, StructArrays, Polyester, MLStyle
 using Expronicon.ADT: @adt
-using Expronicon
 import FunctionWrappers: FunctionWrapper
 
 const T = Float32
@@ -548,8 +547,8 @@ using BenchmarkTools
 function benchmark(;print=false, parallel=true)
     scene, spectrum_img, camera = setup()
 
-    display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel))
-    rgb_img = map(x -> RGB(x...), spectrum_img)
+    display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel) teardown=sleep(0.5) seconds=20)
+    rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
     end
