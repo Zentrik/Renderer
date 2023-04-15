@@ -194,9 +194,9 @@ end
 # metal(fuzz=0) = (ray, n⃗) -> reflect(ray, n⃗, fuzz) # is it slow?
 
 @virtual scatter(ray, n⃗, material::Material) = error()
-@override scatter(ray, n⃗, material::Dielectric) = glass(ray, n⃗, material.ior)
-@override scatter(ray, n⃗, material::Lambertian) = lambertian(ray, n⃗)
-@override scatter(ray, n⃗, material::Metal) = reflect(ray, n⃗, material.fuzz)
+@override scatter(ray, n⃗, material::Dielectric) = material.attenuation, glass(ray, n⃗, material.ior)
+@override scatter(ray, n⃗, material::Lambertian) = material.attenuation, lambertian(ray, n⃗)
+@override scatter(ray, n⃗, material::Metal) = material.attenuation, reflect(ray, n⃗, material.fuzz)
 
 @generated function getBits(mask::SIMD.Vec{N, Bool}) where N #This reverses the bits
     s = """
@@ -299,9 +299,9 @@ end
             return accumulated_attenuation .* world_color(r)
         else
             # # @assert norm(record.normal) ≈ 1
-            direction = scatter(r, record.normal, record.material)
+            attenuation, direction = scatter(r, record.normal, record.material)
             # # @assert norm(direction) ≈ 1
-            attenuation = record.material.attenuation::Spectrum
+            # attenuation = record.material.attenuation::Spectrum
 
             # @fastmath @inline (direction, attenuation) = @match record.material begin
             #     Material.Lambertian(attenuation) => (lambertian(r, record.normal), attenuation)
@@ -348,7 +348,7 @@ function scene_random_spheres()
 	push!(HittableList, Sphere([4,0,1], 1, Metal([0.7,0.6,0.5], 0)))
 
     append!(HittableList, repeat([Sphere(zeros(Point), 0, Lambertian())], (N - mod1(length(HittableList), N))))
-    tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
+    tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))::StructVector{Sphere, NamedTuple{(:centre, :radius, :material), Tuple{StructVector{SVector{3, Float32}, NamedTuple{(:x, :y, :z), Tuple{Vector{Float32}, Vector{Float32}, Vector{Float32}}}, Int64}, Vector{Float32}, Vector{Material}}}, Int64}
     return hittable_list(tmp);
 end
 
