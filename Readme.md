@@ -5,17 +5,31 @@ singlethreaded 2300ms
 multithreaded 300ms
 
 
-julia - adding teardown=(sleep(0.5)) makes @benchmark give quicker results (presumably more accurate)
+julia - adding teardown=(sleep(0.5)) makes @benchmark give quicker results (presumably more accurate) and matches @time result
+
 production()
 
 single 2.5s 
 multi  300ms using @time / 370ms using @benchmark median
 
-Expronicon
+Expronicon #e946f5f
 
 single
 multi 280ms / 342 using @benchmark median
 
+Virtual.jl - Look at Virtual.jl branch
+using teardown benchmark()
+
+single 
+multi 285ms
+
+Virtual.jl - with attenuation stored in sphere instead of in material - (no improvement when also returning sphere and hitrecord to avoid acessesing sphere.material in findSceneIntersection) #5c7108a
+using teardown benchmark()
+
+single 
+multi 275ms - skeptical this is different to Expronicon
+
+ON BATTERY POWER
 Virtual.jl
 using teardown benchmark()
 
