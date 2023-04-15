@@ -322,7 +322,7 @@ function scene_random_spheres()
 	push!(HittableList, Sphere([-4,0,1], 1, Material.Lambertian([0.4,0.2,0.1])))
 	push!(HittableList, Sphere([4,0,1], 1, Material.Metal([0.7,0.6,0.5], 0)))
 
-    append!(HittableList, repeat([Sphere(zeros(Point), 0)], (N - mod1(length(HittableList), N))))
+    append!(HittableList, repeat([Sphere(zeros(Point), 0, Material.Lambertian())], (N - mod1(length(HittableList), N))))
     tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))::StructVector{Sphere, NamedTuple{(:centre, :radius, :material), Tuple{StructVector{SVector{3, Float32}, NamedTuple{(:x, :y, :z), Tuple{Vector{Float32}, Vector{Float32}, Vector{Float32}}}, Int64}, Vector{Float32}, Vector{Material}}}, Int64}
     return hittable_list(tmp);
 end
@@ -386,32 +386,32 @@ function claforte(parallel=true)
     return spectrumToRGB(spectrum_img)
 end
 
-function profview(parallel=true)
-    scene, spectrum_img, camera = setup()
+# function profview(parallel=true)
+#     scene, spectrum_img, camera = setup()
 
-    @profview render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
-    return spectrumToRGB(spectrum_img)
-end
+#     @profview render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
+#     return spectrumToRGB(spectrum_img)
+# end
 
-function profview_allocs(parallel=true)
-    scene, spectrum_img, camera = setup()
+# function profview_allocs(parallel=true)
+#     scene, spectrum_img, camera = setup()
 
-    @profview_allocs render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
-    return spectrumToRGB(spectrum_img)
-end
+#     @profview_allocs render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
+#     return spectrumToRGB(spectrum_img)
+# end
 
-using Profile, PProf
-function profile()
-    HittableList, spectrum_img, camera = setup(10)
+# using Profile, PProf
+# function profile()
+#     HittableList, spectrum_img, camera = setup(10)
 
-    render!(spectrum_img, HittableList, camera, samples_per_pixel=10)
+#     render!(spectrum_img, HittableList, camera, samples_per_pixel=10)
 
-    Profile.Allocs.clear(); 
+#     Profile.Allocs.clear(); 
 
-    Profile.Allocs.@profile sample_rate=1 render!(spectrum_img, scene, camera)
+#     Profile.Allocs.@profile sample_rate=1 render!(spectrum_img, scene, camera)
 
-    PProf.Allocs.pprof(from_c=false, webport=8080)
-end
+#     PProf.Allocs.pprof(from_c=false, webport=8080)
+# end
 
 using BenchmarkTools
 function benchmark(;print=false, parallel=true)
