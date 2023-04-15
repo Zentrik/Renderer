@@ -215,7 +215,10 @@ end
     %3 = sext  <$N x i1> %2 to <$N x $t>
     ret <$N x $t> %3
     """
-    return :( $(Expr(:meta,:inline)); Vec(Base.llvmcall($s, SIMD.LVec{$N,$T}, Tuple{SIMD.LVec{$N,Bool}}, x.data)) )
+    return :( 
+        $(Expr(:meta,:inline));
+        Vec(Base.llvmcall($s, SIMD.LVec{$N,$T}, Tuple{SIMD.LVec{$N,Bool}}, x.data))
+    )
 end
 
 @inline @fastmath function SIMD.any(x::SIMD.Vec{8, Bool})

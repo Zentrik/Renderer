@@ -11,6 +11,17 @@ Install by cloning this package and install my fork of SIMD.jl by
 
 # Benchmarks
 
+Using Claforte's benchmark: 1080p; 1000 samples per pixel; max depth is 16
+
+Claforte's code runs in 1663s.
+
+[RayTracingInOneWeekend.jl](src/RayTracingInOneWeekend.jl) runs in 202s
+
+On my laptop which has better avx2 support I get 140s, slightly slower than my c++ code giving 135s.
+
+
+## IGNORE - Other Benchmarks
+
 clang++ PROFVIEW
 
 singlethreaded 2300ms 
