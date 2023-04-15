@@ -279,12 +279,12 @@ end
 @fastmath function ray_color(r, world, depth, tmin=1e-4, tmax=Inf)
     accumulated_attenuation = ones(Spectrum)
 
-    for _ in 1:depth
+    for sample in 1:depth
         record = findSceneIntersection(r, world, tmin, tmax)
 
         if record.t == tmax # nothing hit, t from initialRecord
             # @assert all(world_color(r) .>= 0)
-            return accumulated_attenuation .* world_color(r)
+            return accumulated_attenuation .* world_color(r), sample
         else
             # # @assert norm(record.normal) ≈ 1
             # direction = scatter(r, record.normal, sphere.material)
@@ -302,7 +302,7 @@ end
         end
     end
 
-    return zeros(Spectrum)
+    return zeros(Spectrum), depth
 end
 
 function scene_random_spheres()
@@ -351,23 +351,55 @@ end
 end
 
 function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=true)
+    rays::Int = 0
+
     if parallel == true
         @sync for j in axes(img, 2)
-            Threads.@spawn @inbounds for i in axes(img, 1)
+            task = Threads.@spawn begin
+                raysPerPixel = 0
+
+                @inbounds for i in axes(img, 1)
+                    for sample in 1:samples_per_pixel
+                        tmp = renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
+                        @inbounds img[i, j] += first(tmp)
+                        raysPerPixel += last(tmp)
+                    end
+                    @inbounds img[i, j] /= samples_per_pixel
+                end
+
+                return raysPerPixel
+            end
+
+            rays += fetch(task)
+            # println(rays)
+        end
+    else
+        # map!(index -> sum(sample -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
+        for j in axes(img, 2)
+            @inbounds for i in axes(img, 1)
                 for sample in 1:samples_per_pixel
-                    @inbounds img[i, j] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
+                    tmp = renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
+                    @inbounds img[i, j] += first(tmp)
+                    rays += last(tmp)
                 end
                 @inbounds img[i, j] /= samples_per_pixel
             end
         end
-    else
-        map!(index -> sum(sample -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
     end
 
-    return nothing
+    return rays
 end
 
 spectrumToRGB(img) = map(x -> RGB(sqrt.(x)...), img)
+
+function rayPerSecond(parallel=true)
+    scene, spectrum_img, camera = setup()
+    startTime = time()
+    rays = render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
+    elapsedTime = time() - startTime
+    return elapsedTime
+    return rays / elapsedTime / 10^6
+end
 
 function setup(resolution=1920/2)
     HittableList = scene_random_spheres();

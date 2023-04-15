@@ -5,6 +5,7 @@ version = "0.2.0"
 
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
+Cthulhu = "f68482b8-f384-11e8-15f7-abe071a5a75f"
 Expronicon = "6b7a57c9-7cc1-4fdf-b7f5-e857abae3636"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
