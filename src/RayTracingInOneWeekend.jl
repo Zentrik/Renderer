@@ -351,11 +351,11 @@ end
 end
 
 function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=true)
-    rays::Int = 0
-
     if parallel == true
+        raysAtomic = Threads.Atomic{Int}(0)
+        
         @sync for j in axes(img, 2)
-            task = Threads.@spawn begin
+            Threads.@spawn begin
                 raysPerPixel = 0
 
                 @inbounds for i in axes(img, 1)
@@ -367,14 +367,15 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
                     @inbounds img[i, j] /= samples_per_pixel
                 end
 
-                return raysPerPixel
+                Threads.atomic_add!(raysAtomic, raysPerPixel)
             end
-
-            rays += fetch(task)
-            # println(rays)
         end
+
+        rays = raysAtomic[]
     else
         # map!(index -> sum(sample -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
+        rays::Int = 0
+
         for j in axes(img, 2)
             @inbounds for i in axes(img, 1)
                 for sample in 1:samples_per_pixel
@@ -393,11 +394,12 @@ end
 spectrumToRGB(img) = map(x -> RGB(sqrt.(x)...), img)
 
 function rayPerSecond(parallel=true)
-    scene, spectrum_img, camera = setup()
+    scene, spectrum_img, camera = setup(1920)
     startTime = time()
-    rays = render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
+    rays = render!(spectrum_img, scene, camera, samples_per_pixel=100, parallel=parallel)
     elapsedTime = time() - startTime
-    return elapsedTime
+    return spectrumToRGB(spectrum_img)
+
     return rays / elapsedTime / 10^6
 end
 
