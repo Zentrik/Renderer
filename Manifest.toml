@@ -2,7 +2,7 @@
 
 julia_version = "1.9.0-rc2"
 manifest_format = "2.0"
-project_hash = "8b60fb2934f04a992e01a43dac0d15d0a89bf544"
+project_hash = "cfe14ccf3887532aac0e24da2adc1d8807fb4bda"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -1369,6 +1369,11 @@ git-tree-sha1 = "c42fa452a60f022e9e087823b47e5a5f8adc53d5"
 uuid = "28d57a85-8fef-5791-bfe6-a80928e7c999"
 version = "0.4.75"
 
+[[deps.Tricks]]
+git-tree-sha1 = "aadb748be58b492045b4f56166b5188aa63ce549"
+uuid = "410a4b4d-49e4-4fbc-ab6d-cb71b17b3775"
+version = "0.1.7"
+
 [[deps.Tullio]]
 deps = ["ChainRulesCore", "DiffRules", "LinearAlgebra", "Requires"]
 git-tree-sha1 = "7871a39eac745697ee512a87eeff06a048a7905b"
@@ -1409,6 +1414,14 @@ deps = ["LoopVectorization", "Static"]
 git-tree-sha1 = "a10cfef26aedae8c2b1892ea1fda9749cdfe3764"
 uuid = "4ffe575c-65e5-43f4-bc05-e0b500dc3d2c"
 version = "0.1.8"
+
+[[deps.Virtual]]
+deps = ["Serialization", "Tricks"]
+git-tree-sha1 = "2ef2256721329747ea74583a49b089fd3c3aa825"
+repo-rev = "main"
+repo-url = "https://github.com/thautwarm/Virtual.jl"
+uuid = "87cea5c3-cd04-42ff-bf54-04b174f6b946"
+version = "0.1.0"
 
 [[deps.WidthLimitedIO]]
 deps = ["Unicode"]

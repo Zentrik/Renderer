@@ -1,5 +1,5 @@
 clang++
-PROFVIEW - This includes writing to a file though
+PROFVIEW
 
 singlethreaded 2300ms
 multithreaded 300ms
@@ -15,3 +15,15 @@ Expronicon
 
 single
 multi 280ms / 342 using @benchmark median
+
+Virtual.jl
+using teardown benchmark()
+
+single 2.374s
+multi 295ms
+
+Virtual.jl - with attenuation stored in sphere instead of in material - (no improvement when also returning sphere and hitrecord to avoid acessesing sphere.material in findSceneIntersection)
+using teardown benchmark()
+
+single 2.361s
+multi 292ms
