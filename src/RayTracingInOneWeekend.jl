@@ -1,6 +1,6 @@
 # This tries to stay faithful to the book's code
 
-using Parameters, StaticArrays, LinearAlgebra, Images, SIMD, StructArrays, MLStyle
+using Parameters, StaticArrays, LinearAlgebra, Images, SIMD, StructArrays, MLStyle, HybridArrays
 using Expronicon.ADT: @adt
 
 const T = Float32
@@ -355,9 +355,9 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
         @sync for j in axes(img, 2)
             Threads.@spawn @inbounds for i in axes(img, 1)
                 for sample in 1:samples_per_pixel
-                    @inbounds img[i, j] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
+                    @inbounds img[i, j, :] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
                 end
-                @inbounds img[i, j] /= samples_per_pixel
+                @inbounds img[i, j, :] /= samples_per_pixel
             end
         end
     else
@@ -367,12 +367,22 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
     return nothing
 end
 
-spectrumToRGB(img) = map(x -> RGB(sqrt.(x)...), img)
+function spectrumToRGB(img) 
+   rgb_img = zeros(RGB, size(img)[1:2]...)
+   
+   for j in axes(img, 2)
+        for i in axes(img, 1)
+            rgb_img[i, j] = RGB(sqrt.(img[i, j, :])...)
+        end
+    end
+
+    return rgb_img
+end
 
 function setup(resolution=1920/2)
     HittableList = scene_random_spheres();
-    spectrum_img = zeros(Spectrum, reverse(imagesize(resolution, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    spectrum_img = HybridArray{Tuple{StaticArrays.Dynamic(), StaticArrays.Dynamic(), 3}}(zeros(Float32, reverse(imagesize(resolution, 16//9))..., 3))
+    camera = Camera(imagesize(resolution, 16//9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
 
     return HittableList, spectrum_img, camera
 end
