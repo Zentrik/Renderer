@@ -16,6 +16,7 @@ clang++ PROFVIEW
 singlethreaded 2300ms 
 multithreaded 300ms
 
+RayTracingInOneWeekend.jl
 julia 1.9.0 rc2 - adding teardown=(sleep(0.5)) makes @benchmark give quicker results (presumably more accurate) and matches @time result
 
 production()
