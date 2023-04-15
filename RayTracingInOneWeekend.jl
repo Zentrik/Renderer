@@ -22,18 +22,22 @@ end
 # end
 
 abstract type Material end
-struct Lambertian <: Material
+@with_kw struct Lambertian <: Material
+    attenuation::Spectrum = ones(Spectrum)
 end
 @with_kw struct Dielectric <: Material
+    attenuation::Spectrum = ones(Spectrum)
     ior::T = 3//2
 end
 @with_kw struct Metal <: Material
+    attenuation::Spectrum = ones(Spectrum)
     fuzz::T = 0
 end
 
 struct hit_record
     p::Point
     normal::Point
+    material::Material
     t::T
 end
 
@@ -42,7 +46,6 @@ abstract type Primitive end
 @with_kw struct Sphere <: Primitive
     centre::Point = zeros(Point)
     radius::T = 1//2
-    attenuation::Spectrum = ones(Spectrum)
     material::Material = Lambertian()
 end
 
@@ -232,8 +235,7 @@ end
     return ccall("llvm.x86.avx.vtestz.ps.256", llvmcall, Int32, (SIMD.LVec{8, Float32}, SIMD.LVec{8, Float32}), y, y) == 0
 end
 
-const initialSphere = Sphere()
-const initialRecord = hit_record(zeros(Point), normalize(ones(Point)), Inf)
+const initialRecord = hit_record(zeros(Point), normalize(ones(Point)), Lambertian(), Inf)
 
 @fastmath function findSceneIntersection(r, hittable_list, tmin, tmax)
     hitT = SIMD.Vec{N, T}(tmax)
@@ -280,9 +282,9 @@ const initialRecord = hit_record(zeros(Point), normalize(ones(Point)), Inf)
         @inbounds sphere = hittable_list.Sphere[i]
         normal = sphere_normal(sphere, position)
 
-        return sphere, hit_record(position, normal, minHitT)
+        return hit_record(position, normal, sphere.material, minHitT)
     else 
-        return initialSphere, initialRecord
+        return initialRecord
     end
 end
 
@@ -290,16 +292,16 @@ end
     accumulated_attenuation = ones(Spectrum)
 
     for _ in 1:depth
-        sphere, record = findSceneIntersection(r, world, tmin, tmax)
+        record = findSceneIntersection(r, world, tmin, tmax)
 
         if record.t == tmax # nothing hit, t from initialRecord
             # @assert all(world_color(r) .>= 0)
             return accumulated_attenuation .* world_color(r)
         else
             # # @assert norm(record.normal) ≈ 1
-            direction = scatter(r, record.normal, sphere.material)
+            direction = scatter(r, record.normal, record.material)
             # # @assert norm(direction) ≈ 1
-            attenuation = sphere.attenuation
+            attenuation = record.material.attenuation::Spectrum
 
             # @fastmath @inline (direction, attenuation) = @match record.material begin
             #     Material.Lambertian(attenuation) => (lambertian(r, record.normal), attenuation)
@@ -317,7 +319,7 @@ end
 
 function scene_random_spheres()
 	# HittableList = Sphere[] # SVector{486, Sphere} #  # StructArrays{Sphere} #
-    HittableList = [Sphere([0, 0, -1000], 1000, [.5, .5, .5], Lambertian())]
+    HittableList = [Sphere([0, 0, -1000], 1000, Lambertian([.5, .5, .5]))]
 
 	for a in -11:10, b in -11:10
 		choose_mat = rand()
@@ -329,24 +331,24 @@ function scene_random_spheres()
 		if choose_mat < 4//5
 			# lambertian
 			albedo = rand(Spectrum) .* rand(Spectrum)
-			push!(HittableList, Sphere(center, 1//5, albedo, Lambertian()))
+			push!(HittableList, Sphere(center, 1//5, Lambertian(albedo)))
 		elseif choose_mat < 95//100
 			# metal
 			albedo = rand(Spectrum) / 2 .+ 1/2
 			fuzz = rand() * 5
-			push!(HittableList, Sphere(center, 0.2, albedo, Metal(fuzz)))
+			push!(HittableList, Sphere(center, 0.2, Metal(albedo, fuzz)))
 		else
 			# glass
-			push!(HittableList, Sphere(center, 0.2, ones(Spectrum), Dielectric()))
+			push!(HittableList, Sphere(center, 0.2, Dielectric()))
 		end
 	end
 
-	push!(HittableList, Sphere([0,0,1], 1, ones(Spectrum), Dielectric()))
-	push!(HittableList, Sphere([-4,0,1], 1, [0.4,0.2,0.1], Lambertian()))
-	push!(HittableList, Sphere([4,0,1], 1, [0.7,0.6,0.5], Metal(0)))
+	push!(HittableList, Sphere([0,0,1], 1, Dielectric()))
+	push!(HittableList, Sphere([-4,0,1], 1, Lambertian([0.4,0.2,0.1])))
+	push!(HittableList, Sphere([4,0,1], 1, Metal([0.7,0.6,0.5], 0)))
 
-    append!(HittableList, repeat([Sphere(zeros(Point), 0, ones(Spectrum), Lambertian())], (N - mod1(length(HittableList), N))))
-    tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))::StructVector{Sphere, NamedTuple{(:centre, :radius, :attenuation, :material), Tuple{StructVector{SVector{3, Float32}, NamedTuple{(:x, :y, :z), Tuple{Vector{Float32}, Vector{Float32}, Vector{Float32}}}, Int64}, Vector{Float32}, StructVector{SVector{3, Float32}, NamedTuple{(:x, :y, :z), Tuple{Vector{Float32}, Vector{Float32}, Vector{Float32}}}, Int64}, Vector{Material}}}, Int64}
+    append!(HittableList, repeat([Sphere(zeros(Point), 0, Lambertian())], (N - mod1(length(HittableList), N))))
+    tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
     return hittable_list(tmp);
 end
 
