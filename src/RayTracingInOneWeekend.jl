@@ -1,7 +1,10 @@
 # This tries to stay faithful to the book's code
 
-using Parameters, StaticArrays, LinearAlgebra, Images, SIMD, StructArrays, MLStyle
+using Parameters, StaticArrays, LinearAlgebra, Images, SIMD, StructArrays, MLStyle, SmartAsserts
 using Expronicon.ADT: @adt
+
+SmartAsserts.set_enabled(false)
+Fast = false
 
 const T = Float32
 const N = 8 # vector width
@@ -12,9 +15,9 @@ const Spectrum = SVector{3, T}
 @with_kw struct Ray @deftype Point
     origin = zeros(Point)
     direction = Point(0, 1, 0)
-    # @assert norm(direction) ≈ 1
+    @smart_assert norm(direction) ≈ 1 "Ray direction not normalised for Ray with origin $origin and direction $direction"
 end
-@inline @fastmath (ray::Ray)(t) = ray.origin + t * ray.direction
+@inline (ray::Ray)(t) = ray.origin + t * ray.direction
 
 @adt Material begin
     struct Lambertian
@@ -39,7 +42,7 @@ end
 
 abstract type Primitive end
 
-@with_kw struct Sphere <: Primitive
+@kwdef struct Sphere <: Primitive
     centre::Point = zeros(Point)
     radius::T = 1//2
     material::Material = Material.Lambertian()
@@ -55,7 +58,7 @@ end
 StructArrays.component(m::Point, key::Symbol) = getproperty(m, key)
 StructArrays.createinstance(::Type{Point}, args...) = Point(args)
 
-@with_kw struct hittable_list{T}
+@kwdef struct hittable_list{T}
     Sphere::T = []
 end
 
@@ -105,29 +108,44 @@ function world_color(ray)
     return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0) # Spectrum{3, Float64} instead of Spectrum{3, T} saves 1mb, 0.2s for nx=50. 
 end
 
-@inline @fastmath function random_in_unit_disk()
-    while true
-        p = SVector{2, T}(rand(T) * 2 - 1, rand(T) * 2 - 1)
-        # p = rand(SVector{2, T}) * 2 .- 1
-        if norm2(p) < 1
-            return p
+@static if Fast
+    @inline @fastmath random_in_unit_disk() = normalize_fast(SVector{2, T}(randn(), randn()))
+
+    @inline @fastmath function random_in_unit_sphere()
+        while true
+            sample = Point(rand(T) * 2 - 1, rand(T) * 2 - 1, rand(T) * 2 - 1)
+            if norm2(sample) < 1
+                return sample
+            end
         end
     end
-end
 
-@inline @fastmath function random_in_unit_sphere()
-    while true
-        sample = Point(rand(T) * 2 - 1, rand(T) * 2 - 1, rand(T) * 2 - 1)
-        # sample = @inline rand(Point) * 2 .- 1
-        if norm2(sample) < 1
-            return sample
+    @inline @fastmath random_on_unit_sphere_surface() = normalize_fast(Point(randn(), randn(), randn()))
+else
+    @inline @fastmath function random_in_unit_disk()
+        while true
+            p = SVector{2, T}(rand(T) * 2 - 1, rand(T) * 2 - 1)
+            # p = rand(SVector{2, T}) * 2 .- 1
+            if norm2(p) < 1
+                return p
+            end
         end
     end
-end
 
-@inline @fastmath function random_on_unit_sphere_surface()
-    tmp = random_in_unit_sphere()
-    return normalize_fast(tmp)
+    @inline @fastmath function random_in_unit_sphere()
+        while true
+            sample = Point(rand(T) * 2 - 1, rand(T) * 2 - 1, rand(T) * 2 - 1)
+            # sample = @inline rand(Point) * 2 .- 1
+            if norm2(sample) < 1
+                return sample
+            end
+        end
+    end
+
+    @inline @fastmath function random_on_unit_sphere_surface()
+        tmp = random_in_unit_sphere()
+        return normalize_fast(tmp)
+    end
 end
 
 @fastmath function reflect(ray, n⃗, fuzz=0)
@@ -155,6 +173,7 @@ end
     into = cosθ > 0
 
     sinθ = sqrt(max(1 - cosθ^2, zero(T)))
+    @smart_assert !isnan(sinθ)
     
     if into
         ior_ratio = air_ior / ior
@@ -169,6 +188,7 @@ end
     else
         Rperp = ior_ratio * (ray.direction + cosθ * n⃗)
         Rpar = - sqrt(max(1 - norm2(Rperp), zero(T))) * n⃗
+        @smart_assert !isnan(Rpar)
 
         return normalize_fast(Rperp + Rpar)
     end
@@ -285,14 +305,12 @@ end
     for _ in 1:depth
         record = findSceneIntersection(r, world, tmin, tmax)
 
+        @smart_assert !any(isnan.(accumulated_attenuation)) "$accumulated_attenuation"
         if record.t == tmax # nothing hit, t from initialRecord
-            # @assert all(world_color(r) .>= 0)
+            @smart_assert all(world_color(r) .>= 0)
             return accumulated_attenuation .* world_color(r)
         else
-            # # @assert norm(record.normal) ≈ 1
-            # direction = scatter(r, record.normal, sphere.material)
-            # # @assert norm(direction) ≈ 1
-            # attenuation = sphere.attenuation
+            @smart_assert isapprox(norm(record.normal), 1; atol=1e-2) "$(record.normal)"
 
             @fastmath @inline (direction, attenuation) = @match record.material begin
                 Material.Lambertian(attenuation) => (lambertian(r, record.normal), attenuation)
