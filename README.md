@@ -2,7 +2,7 @@
 
 My implementation of https://raytracing.github.io/books/RayTracingInOneWeekend.html in Julia.
 
-[RayTracingInOneWeekend.jl](./RayTracingInOneWeekend.jl) tries to have similar code to the book whilst [Fast.jl](Fast.jl) just aims to be as fast as it can.
+[RayTracingInOneWeekend.jl](src/RayTracingInOneWeekend.jl) tries to have similar code to the book whilst [Fast.jl](src/Fast.jl) just aims to be as fast as it can.
 
 Install by cloning this package and install my fork of SIMD.jl by
 ```julia
