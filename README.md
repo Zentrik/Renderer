@@ -8,6 +8,8 @@ Install by cloning this package and install my fork of SIMD.jl by
 ```julia
 ] add https://github.com/Zentrik/SIMD.jl
 ```
+Then open either [RayTracingInOneWeekend.jl](src/RayTracingInOneWeekend.jl) or [Fast.jl](src/Fast.jl), install the other necessary packages and run.
+
 
 Delete the definition of `SIMD.any()` if your computer does not support avx (this may also give a speedup if you have avx512)
 
