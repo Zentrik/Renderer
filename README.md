@@ -22,6 +22,8 @@ On my laptop which has better avx2 support I get 140s, slightly slower than my c
 
 ## IGNORE - Other Benchmarks
 
+Polyester, ThreadsX and tullio are all slower than using @spawn
+
 clang++ PROFVIEW
 
 singlethreaded 2300ms 
