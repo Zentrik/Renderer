@@ -6,12 +6,15 @@ version = "0.2.0"
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 Expronicon = "6b7a57c9-7cc1-4fdf-b7f5-e857abae3636"
+FastBroadcast = "7034ab61-46d4-4ed7-9d0f-46aef9175898"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 SIMD = "fdea26ae-647d-5447-a871-4b548cad5224"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
+StrideArrays = "d1fa6d79-ef01-42a6-86c9-f7c551f8593b"
+StrideArraysCore = "7792a7ef-975c-4747-a70f-980b88e8d1da"
 StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 
 [extras]

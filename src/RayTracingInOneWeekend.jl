@@ -1,13 +1,13 @@
 # This tries to stay faithful to the book's code
 
-using Parameters, StaticArrays, LinearAlgebra, Images, SIMD, StructArrays, MLStyle
+using Parameters, StaticArrays, LinearAlgebra, Images, SIMD, StructArrays, MLStyle, StrideArrays, StrideArraysCore
 using Expronicon.ADT: @adt
 
 const T = Float32
 const N = 8 # vector width
 
 const Point = SVector{3, T} # We use T so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
-const Spectrum = SVector{3, T}
+const Spectrum = StrideArraysCore.StaticStrideArray{Float32, 1, (1,), Tuple{StaticInt{3}}, Tuple{Nothing}, Tuple{StaticInt{1}}, 3}
 
 @with_kw struct Ray @deftype Point
     origin = zeros(Point)
@@ -18,14 +18,14 @@ end
 
 @adt Material begin
     struct Lambertian
-        attenuation::Spectrum = ones(Spectrum)
+        attenuation::Spectrum = StrideArray{T}(one, static(3))
     end
     struct Dielectric
-        attenuation::Spectrum = ones(Spectrum)
+        attenuation::Spectrum = StrideArray{T}(one, static(3))
         ior::T = 3//2
     end
     struct Metal
-        attenuation::Spectrum = ones(Spectrum)
+        attenuation::Spectrum = StrideArray{T}(one, static(3))
         fuzz::T = 0
     end
 end
@@ -100,9 +100,14 @@ end
 
 @inline @fastmath normalize_fast(x) = x * (1 / sqrt(norm2(x)))
 
-function world_color(ray)
+using FastBroadcast
+
+@inline function world_color(ray)
     interp = (ray.direction.z + 1) / 2
-    return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0) # Spectrum{3, Float64} instead of Spectrum{3, T} saves 1mb, 0.2s for nx=50. 
+    tmp = StrideArray{T}(undef, static(3))
+    tmp .= [0.5, 0.7, 1.0]
+    tmp2 = StrideArray{T}(one, static(3))
+    return @.. (1 - interp) * tmp2 + interp * tmp # Spectrum{3, Float64} instead of Spectrum{3, T} saves 1mb, 0.2s for nx=50. 
 end
 
 @inline @fastmath function random_in_unit_disk()
@@ -280,14 +285,23 @@ const initialRecord = hit_record(zeros(Point), normalize(ones(Point)), Sphere().
 end
 
 @fastmath function ray_color(r, world, depth, tmin=1e-4, tmax=Inf)
-    accumulated_attenuation = ones(Spectrum)
+    accumulated_attenuation = StrideArray{Float32}(one, static(3))
 
     for _ in 1:depth
         record = findSceneIntersection(r, world, tmin, tmax)
 
         if record.t == tmax # nothing hit, t from initialRecord
             # @assert all(world_color(r) .>= 0)
-            return accumulated_attenuation .* world_color(r)
+            interp = (r.direction.z + 1) / 2
+            # tmp = StrideArray{T}(undef, static(3))
+            # tmp .= [0.5, 0.7, 1.0]
+            # tmp2 = StrideArray{T}(one, static(3))
+            # colour = @.. (1 - interp) * tmp2 + interp * tmp # Spectrum{3, Float64} instead of Spectrum{3, T} saves 1mb, 0.2s for nx=50.
+            accumulated_attenuation[1] *= (1 - interp) * 1 + interp * T(0.5)
+            accumulated_attenuation[2] *= (1 - interp) * 1 + interp * T(0.7)
+            accumulated_attenuation[3] *= (1 - interp) * 1 + interp * T(1)
+
+            return accumulated_attenuation
         else
             # # @assert norm(record.normal) ≈ 1
             # direction = scatter(r, record.normal, sphere.material)
@@ -301,32 +315,37 @@ end
             end
 
             r = Ray(record.p, direction)
-            accumulated_attenuation = accumulated_attenuation .* attenuation
+            accumulated_attenuation .*= attenuation
         end
     end
 
-    return zeros(Spectrum)
+    return @StrideArray zeros(T, 3)
 end
 
 function scene_random_spheres()
-    HittableList = [Sphere([0, 0, -1000], 1000, Material.Lambertian([.5, .5, .5]))]
+    vector = StrideArray{Float32}(undef, static(3))
+    vector .= [.5, .5, .5]
+    HittableList = [Sphere([0, 0, -1000], 1000, Material.Lambertian(vector))]
 
 	for a in -11:10, b in -11:10
 		choose_mat = rand()
 		center = [a + 0.9*rand(), -(b + 0.9*rand()), 0.2]
+        vector = StrideArray{Float32}(undef, static(3))
 
 		# skip spheres too close?
 		if norm(center - SA[4,0, 0.2]) < 0.9 continue end 
 			
 		if choose_mat < 4//5
 			# lambertian
-			albedo = rand(Spectrum) .* rand(Spectrum)
-			push!(HittableList, Sphere(center, 1//5, Material.Lambertian(albedo)))
+			albedo = rand(3) .* rand(3)
+            vector .= albedo
+			push!(HittableList, Sphere(center, 1//5, Material.Lambertian(vector)))
 		elseif choose_mat < 95//100
 			# metal
-			albedo = rand(Spectrum) / 2 .+ 1/2
+			albedo = rand(3) / 2 .+ 1/2
 			fuzz = rand() * 5
-			push!(HittableList, Sphere(center, 0.2, Material.Metal(albedo, fuzz)))
+            vector .= albedo
+			push!(HittableList, Sphere(center, 0.2, Material.Metal(vector, fuzz)))
 		else
 			# glass
 			push!(HittableList, Sphere(center, 0.2, Material.Dielectric()))
@@ -334,8 +353,12 @@ function scene_random_spheres()
 	end
 
 	push!(HittableList, Sphere([0,0,1], 1, Material.Dielectric()))
-	push!(HittableList, Sphere([-4,0,1], 1, Material.Lambertian([0.4,0.2,0.1])))
-	push!(HittableList, Sphere([4,0,1], 1, Material.Metal([0.7,0.6,0.5], 0)))
+    vector = StrideArray{Float32}(undef, static(3))
+    vector .= [0.4,0.2,0.1]
+	push!(HittableList, Sphere([-4,0,1], 1, Material.Lambertian(vector)))
+    vector = StrideArray{Float32}(undef, static(3))
+    vector .= [0.7,0.6,0.5]
+	push!(HittableList, Sphere([4,0,1], 1, Material.Metal(vector, 0)))
 
     append!(HittableList, repeat([Sphere(zeros(Point), 0, Material.Lambertian())], (N - mod1(length(HittableList), N))))
     tmp = StructArray(HittableList, unwrap = T -> (T<:AbstractVector))
@@ -358,24 +381,43 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
         @sync for j in axes(img, 2)
             Threads.@spawn @inbounds for i in axes(img, 1)
                 for sample in 1:samples_per_pixel
-                    @inbounds img[i, j] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
+                    @inbounds img[i, j, :] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
                 end
-                @inbounds img[i, j] /= samples_per_pixel
+                @inbounds img[i, j, :] /= samples_per_pixel
             end
         end
     else
-        map!(index -> sum(sample -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
+        # map!(index -> sum(sample -> renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera), 1:samples_per_pixel) / samples_per_pixel, img, CartesianIndices(img))
+        for j in axes(img, 2)
+            @inbounds for i in axes(img, 1)
+                for sample in 1:samples_per_pixel
+                    @inbounds img[i, j, :] .+= renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
+                end
+                @inbounds img[i, j, :] ./= samples_per_pixel
+            end
+        end
     end
 
     return nothing
 end
 
-spectrumToRGB(img) = map(x -> RGB(sqrt.(x)...), img)
+function spectrumToRGB(img) 
+    rgb_img = zeros(RGB, size(img)[1:2]...)
+    
+    for j in axes(img, 2)
+         for i in axes(img, 1)
+             rgb_img[i, j] = RGB(sqrt.(img[i, j, :])...)
+         end
+     end
+ 
+     return rgb_img
+end
 
 function setup(resolution=1920/2)
     HittableList = scene_random_spheres();
-    spectrum_img = zeros(Spectrum, reverse(imagesize(resolution, 16//9))...)
-    camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
+    spectrum_img = StrideArray{T}(one, reverse(imagesize(resolution, 16//9))..., static(3))
+    spectrum_img .= 0
+    camera = Camera(imagesize(resolution, 16//9)..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
 
     return HittableList, spectrum_img, camera
 end
