@@ -1,12 +1,12 @@
 name: CI (Julia nightly)
 on:
   pull_request:
-    branches:
-      - master
+    # branches:
+    #   - master
   push:
-    branches:
-      - master
-    tags: '*'
+    # branches:
+    #   - master
+    # tags: '*'
 jobs:
   test_julia_nightly:
     name: Julia ${{ matrix.version }} - ${{ matrix.os }} - ${{ matrix.arch }} - ${{ github.event_name }}
