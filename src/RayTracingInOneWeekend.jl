@@ -151,12 +151,10 @@ end
 @fastmath function reflect(ray, n⃗, fuzz=0)
     direction = ray.direction - 2(ray.direction ⋅ n⃗) * n⃗
 
-    if fuzz ≉ 0
+    # Is branching worth it?
+    if fuzz != 0
         direction += fuzz * random_in_unit_sphere()
     end
-
-    # This does not absorb if direction is into the object !!!!
-    # maybe return zeros(Point) if into and then if in ray_color?
 
     return normalize_fast(direction)
 end
@@ -164,6 +162,11 @@ end
 @fastmath function shick(cosθ, ior_ratio)
     r0 = ((1 - ior_ratio) / (1 + ior_ratio))^2
     return r0 + (1 - r0) * (1 - cosθ)^5
+end
+
+@fastmath function metal(ray, n⃗, fuzz=0)
+    @inline scattered = reflect(ray, n⃗, fuzz)
+    return scattered, scattered ⋅ n⃗ > 0 # check if scatterd direction is into the object
 end
 
 @fastmath function glass(ray, n⃗, ior)
@@ -312,10 +315,10 @@ end
         else
             @smart_assert isapprox(norm(record.normal), 1; atol=1e-2) "$(record.normal)"
 
-            @fastmath @inline (direction, attenuation) = @match record.material begin
-                Material.Lambertian(attenuation) => (lambertian(r, record.normal), attenuation)
-                Material.Dielectric(attenuation, ior) => (glass(r, record.normal, ior), attenuation)
-                Material.Metal(attenuation, fuzz) => (reflect(r, record.normal, fuzz), attenuation)
+            @fastmath @inline (direction, scatterAgain, attenuation) = @match record.material begin
+                Material.Lambertian(attenuation) => (lambertian(r, record.normal), true, attenuation)
+                Material.Dielectric(attenuation, ior) => (glass(r, record.normal, ior), true, attenuation)
+                Material.Metal(attenuation, fuzz) => (metal(r, record.normal, fuzz)..., attenuation)
             end
 
             r = Ray(record.p, direction)
@@ -450,7 +453,11 @@ using BenchmarkTools
 function benchmark(;print=false, parallel=true)
     scene, spectrum_img, camera = setup()
 
-    display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel) teardown=sleep(1) seconds=20)
+    if parallel != false
+        display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel) teardown=sleep(1) seconds=20)
+    else
+        display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel))
+    end
     rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
