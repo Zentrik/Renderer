@@ -3,7 +3,7 @@
 using Parameters, StaticArrays, LinearAlgebra, Images, SIMD, StructArrays, MLStyle, SmartAsserts
 using Expronicon.ADT: @adt
 
-SmartAsserts.set_enabled(false)
+# SmartAsserts.set_enabled(false)
 Fast = false
 
 const T = Float32
