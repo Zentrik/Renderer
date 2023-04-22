@@ -1,12 +1,14 @@
 using Renderer, Test, SmartAsserts
 
 @testset "Slow" begin
+    SmartAsserts.set_enabled(true)
+
     @test_nowarn Renderer.test(false)
     @test_nowarn Renderer.test()
 end
 
 @testset "Assertions" begin
-    SmartAsserts.set_enabled(false)
+    SmartAsserts.set_enabled(true)
 
     @test_nowarn Renderer.Ray()
     @test_nowarn Renderer.Ray(direction = ones(Renderer.Point))
