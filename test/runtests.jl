@@ -11,7 +11,7 @@ end
     SmartAsserts.set_enabled(true)
 
     @test_nowarn Renderer.Ray()
-    @test_nowarn Renderer.Ray(direction = ones(Renderer.Point))
+    @test_nowarn Renderer.Ray(direction = Renderer.Point(0, 1, 0))
 
     @test_throws AssertionError Renderer.Ray(direction = zeros(Renderer.Point))
     @test_throws AssertionError Renderer.Ray(direction = Renderer.Point(0, 1, 1))
