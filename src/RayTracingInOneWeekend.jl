@@ -64,15 +64,15 @@ end
 
 imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
 
-@with_kw struct Camera{F<:Real} @deftype Point
-    u
-    v
+struct Camera{F<:Real}
+    u::Point
+    v::Point
 
-    right
-	down
+    right::Point
+	down::Point
 
-    upper_left_corner
-	pinhole_location
+    upper_left_corner::Point
+	pinhole_location::Point
 
     lens_radius::F
 end
