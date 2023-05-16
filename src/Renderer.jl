@@ -1,5 +1,5 @@
 module Renderer
 
-# include("RayTracingInOneWeekend.jl")
+include("RayTracingInOneWeekend.jl")
 
 end
