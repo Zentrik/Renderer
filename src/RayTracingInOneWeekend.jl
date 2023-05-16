@@ -5,7 +5,7 @@ using Expronicon.ADT: @adt
 
 if CUDA.functional()
     CUDA.allowscalar(false)
-    const var"@time_adapt" = var"CUDA.@time"
+    const var"@time_adapt" = CUDA.var"@time"
     SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
 else
     const var"@time_adapt" = var"@time"
