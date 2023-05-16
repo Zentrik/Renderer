@@ -6,11 +6,12 @@ using Expronicon.ADT: @adt
 if CUDA.functional()
     CUDA.allowscalar(false)
     const var"@time_adapt" = var"CUDA.@time"
+    SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
 else
     const var"@time_adapt" = var"@time"
 end
 
-SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
+# SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
 
 import SmartAsserts.@smart_assert
 macro smart_assert(ex, msg=nothing)
