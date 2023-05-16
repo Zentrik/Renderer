@@ -1,10 +1,14 @@
 # This tries to stay faithful to the book's code
-using Revise
-using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, MLStyle, SmartAsserts, KernelAbstractions, CUDA
+# using Revise
+using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, MLStyle, SmartAsserts, KernelAbstractions, CUDA, Adapt
 using Expronicon.ADT: @adt
-using Adapt
 
-CUDA.allowscalar(false)
+if CUDA.functional()
+    CUDA.allowscalar(false)
+    const var"@time_adapt" = var"CUDA.@time"
+else
+    const var"@time_adapt" = var"@time"
+end
 
 SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
 
@@ -32,6 +36,7 @@ const F = Float32
 
 const N = 8 # SIMD vector width
 
+### TYPES
 const Point = SVector{3, F} # We use F so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
 const Spectrum = SVector{3, F}
 
@@ -120,6 +125,8 @@ function Camera(nx::Integer=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Poi
     return Camera(u, v, right, down, upper_left_corner, pinhole_location, lens_radius)
 end
 
+### General Functions
+
 @fastmath pixelWorldPosition(camera, index) = pixelWorldPosition(camera, index[1], index[2])
 @fastmath pixelWorldPosition(camera, x, y) = camera.upper_left_corner + (y - 1) * camera.right + (x - 1) * camera.down
 
@@ -184,6 +191,8 @@ end
     return normalize_fast(direction)
 end
 
+### Materials
+
 @fastmath function shick(cosθ, ior_ratio)
     r0 = ((1 - ior_ratio) / (1 + ior_ratio))^2
     return r0 + (1 - r0) * (1 - cosθ)^5
@@ -233,6 +242,8 @@ end
     direction = normalize_fast(vector)
     return direction
 end
+
+### Render Loop
 
 @fastmath @inbounds function findSceneIntersection(r, hittable_list, tmin::F, tmax::F)
     minHitT = tmax
@@ -314,6 +325,41 @@ end
     return zeros(Spectrum)
 end
 
+@fastmath function renderRay(HittableList, maxDepth, pixel_position, camera)
+    random_pixel_position = pixel_position + rand(F) * camera.right + rand(F) * camera.down
+
+    defocus_random = camera.lens_radius * random_in_unit_disk()
+    defocus_offset = defocus_random[1] * camera.u + defocus_random[2] * camera.v
+
+    ray = Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
+
+    return ray_color(ray, HittableList, maxDepth)
+end
+
+function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=true)
+    if parallel == true
+        @sync for j in axes(img, 2)
+            Threads.@spawn @inbounds for i in axes(img, 1)
+                for sample in 1:samples_per_pixel
+                    @inbounds img[i, j] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
+                end
+                @inbounds img[i, j] /= samples_per_pixel
+            end
+        end
+    else
+        map!(img, CartesianIndices(img)) do index
+            for sample in 1:samples_per_pixel
+                img[index] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera)
+            end
+            img[index] /= samples_per_pixel
+        end
+    end
+
+    return nothing
+end
+
+### Scene Setup
+
 function scene_random_spheres()
     HittableList = [Sphere([0, 0, -1000], 1000, Material.Lambertian([.5, .5, .5]))]
 
@@ -348,40 +394,8 @@ function scene_random_spheres()
     return hittable_list(tmp);
 end
 
-@fastmath function renderRay(HittableList, maxDepth, pixel_position, camera)
-    random_pixel_position = pixel_position + rand(F) * camera.right + rand(F) * camera.down
-
-    defocus_random = camera.lens_radius * random_in_unit_disk()
-    defocus_offset = defocus_random[1] * camera.u + defocus_random[2] * camera.v
-
-    ray = Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
-
-    return ray_color(ray, HittableList, maxDepth)
-end
-
-function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=true)
-    if parallel == true
-        @sync for j in axes(img, 2)
-            Threads.@spawn @inbounds for i in axes(img, 1)
-                for sample in 1:samples_per_pixel
-                    @inbounds img[i, j] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
-                end
-                @inbounds img[i, j] /= samples_per_pixel
-            end
-        end
-    else
-        map!(img, CartesianIndices(img)) do index
-            for sample in 1:samples_per_pixel
-                img[index] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera)
-            end
-            img[index] /= samples_per_pixel
-        end
-    end
-
-    return nothing
-end
-
-spectrumToRGB(img) = map(x -> RGB(sqrt.(x)...), img)
+### Run Code
+spectrumToRGB(img) = map(x -> RGB(sqrt.(x)...), img |> Array)
 
 function setup(parallel, resolution=1920/2)
     scene = scene_random_spheres()
@@ -399,22 +413,22 @@ end
 function production(parallel=true)
     scene, spectrum_img, camera = setup(parallel)
 
-    CUDA.@time render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
-    return spectrumToRGB(spectrum_img |> Array)
+    @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
+    return spectrumToRGB(spectrum_img)
 end
 
 function test(parallel=false)
     scene, spectrum_img, camera = setup(parallel, 1920/10)
 
-    @time render!(spectrum_img, scene, camera, samples_per_pixel=5, parallel=parallel)
+    @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=5, parallel=parallel)
 
-    spectrumToRGB(spectrum_img |> Array)
+    spectrumToRGB(spectrum_img)
 end
 
 function claforte(parallel=true)
     scene, spectrum_img, camera = setup(parallel, 1920)
 
-    CUDA.@time render!(spectrum_img, scene, camera, samples_per_pixel=1000, parallel=parallel)
+    @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=1000, parallel=parallel)
     return spectrumToRGB(spectrum_img)
 end
 
@@ -449,12 +463,13 @@ using BenchmarkTools
 function benchmark(;print=false, parallel=true)
     scene, spectrum_img, camera = setup(parallel)
 
-    if parallel != false
-        display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel) teardown=sleep(1) seconds=20)
-    else
-        display(@benchmark CUDA.@sync render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel))
+    @match parallel begin
+        :GPU => display(@benchmark CUDA.@sync render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel))
+        :false => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel))
+        _ => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel) teardown=sleep(1) seconds=20)
     end
-    rgb_img = spectrumToRGB(spectrum_img |> Array)
+
+    rgb_img = spectrumToRGB(spectrum_img)
     if print
         rgb_img |> display
     end
