@@ -17,8 +17,6 @@ Fast = false
 
 const F = Float32
 
-const N = 8 # SIMD vector width
-
 ### TYPES
 const Point = SVector{3, F} # We use F so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
 const Spectrum = SVector{3, F}
@@ -306,8 +304,8 @@ to_tup(v::Vec{N,T}) where {N,T} = ntuple(i->v[i], N)
     minHitT = tmax
     minIndex = 0
 
-    for i in eachindex(hittable_list.spheres)
-        cx, cy, cz, radius = to_tup(hittable_list.spheres.centre_radius[i])
+    for i in eachindex(hittable_list.spheres.material)
+        @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[1:4, i] #[4*(i-1)+1:4*i] #vloada(Vec{4, F}, hittable_list.spheres.centre_radius, 1+4*i) |> to_tup
         # cx, cy, cz, radius = to_tup(vloada(Vec{4, F}, pointer(hittable_list.spheres.centre_radius[i])))
         # cx, cy, cz, radius = to_tup(to_vec(hittable_list.spheres.centre_radius[i]))
         # cx, cy, cz, radius = hittable_list.spheres.centre_radius[i]
@@ -341,11 +339,12 @@ to_tup(v::Vec{N,T}) where {N,T} = ntuple(i->v[i], N)
 
     if minHitT < tmax
         position = r(minHitT)
-        @inbounds sphere = hittable_list.spheres[minIndex]
+        @inbounds centre_radius = @view hittable_list.spheres.centre_radius[1:4, minIndex]
+        @inbounds material = hittable_list.spheres.material[minIndex]
 
-        @inbounds normal = sphere_normal(Point(sphere.centre_radius[1], sphere.centre_radius[2], sphere.centre_radius[3]), sphere.centre_radius[4], position)
+        @inbounds normal = sphere_normal(Point(centre_radius[1], centre_radius[2], centre_radius[3]), centre_radius[4], position)
 
-        return hit_record(position, normal, sphere.material, minHitT)
+        return hit_record(position, normal, material, minHitT)
     else 
         return hit_record(zeros(Point), normalize(ones(Point)), Material.Lambertian(), tmax)
     end
@@ -448,10 +447,12 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
             centre_radius = Base.Experimental.Const(HittableList.spheres.centre_radius)
             material = Base.Experimental.Const(HittableList.spheres.material)
 
-            spheres = StructVector{Sphere, typeof((centre_radius=centre_radius, material=material)), Int64}((centre_radius=centre_radius, material=material))
+            # spheres = StructVector{Sphere, typeof((centre_radius=centre_radius, material=material)), Int64}((centre_radius=centre_radius, material=material))
 
-            scene = hittable_list(spheres)
+            # scene = hittable_list(spheres)
             # scene = HittableList
+
+            scene = hittable_list((centre_radius=centre_radius, material=material))
 
             pixel = zeros(Spectrum)
             for sample in 1:samples_per_pixel
@@ -496,11 +497,6 @@ function scene_random_spheres()
 	push!(HittableList, Sphere([-4,0,1], 1, Material.Lambertian([0.4,0.2,0.1])))
 	push!(HittableList, Sphere([4,0,1], 1, Material.Metal([0.7,0.6,0.5], 0)))
 
-    # if SIMD
-        # append!(HittableList, repeat([Sphere(zeros(Point), 0, Material.Lambertian())], (N - mod1(length(HittableList), N))))
-        # tmp = StructArray(HittableList, unwrap = F -> (F<:AbstractVector))
-    # end
-
     tmp = StructArray(HittableList)
 
     return hittable_list(tmp);
@@ -515,8 +511,11 @@ function setup(parallel, resolution=1920/4, aspect_ratio=16//9)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
 
     if parallel == :GPU
-        scene = hittable_list(CUDA.@allowscalar replace_storage(CuArray, scene.spheres))
+        scene = hittable_list((centre_radius=CuArray(stack(x -> [x[i] for i in 1:4], scene.spheres.centre_radius)), material=CuArray(scene.spheres.material)))
+        # scene = hittable_list(CUDA.@allowscalar replace_storage(CuArray, scene.spheres))
         spectrum_img = CuArray(spectrum_img)
+    else
+        scene = hittable_list((centre_radius=(stack(x -> [x[i] for i in 1:4], scene.spheres.centre_radius)), material=(scene.spheres.material)))
     end
 
     return scene, spectrum_img, camera
@@ -541,18 +540,6 @@ function claforte(parallel=true)
     scene, spectrum_img, camera = setup(parallel, 1920)
 
     @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=1000, parallel=parallel)
-    return spectrumToRGB(spectrum_img)
-end
-
-function voxel_tracer(parallel=true)
-    scene, spectrum_img, camera = setup(parallel, 1200, 12//8)
-
-    # @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=50, parallel=parallel)
-    @match parallel begin
-        :GPU => display(@benchmark (CUDA.@sync render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50)))
-        :false => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50))
-        _ => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50) teardown=sleep(1) seconds=20)
-    end
     return spectrumToRGB(spectrum_img)
 end
 
@@ -610,6 +597,18 @@ function benchmark(;print=false, parallel=true)
         rgb_img |> display
     end
     return nothing
+end
+
+function voxel_tracer(parallel=true)
+    scene, spectrum_img, camera = setup(parallel, 1200, 12//8)
+
+    # @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=50, parallel=parallel)
+    @match parallel begin
+        :GPU => display(@benchmark (CUDA.@sync render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50)))
+        :false => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50))
+        _ => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50) teardown=sleep(1) seconds=20)
+    end
+    return spectrumToRGB(spectrum_img)
 end
 
 # using Cthulhu
