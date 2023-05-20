@@ -1,6 +1,6 @@
 # This tries to stay faithful to the book's code
 # using Revise
-using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, MLStyle, SmartAsserts, KernelAbstractions, CUDA, Adapt, NVTX, SIMD
+using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, MLStyle, SmartAsserts, KernelAbstractions, CUDA, Adapt, NVTX, SIMD, Random
 using Expronicon.ADT: @adt
 
 if CUDA.functional()
@@ -300,12 +300,18 @@ to_vec(t::SVector{N,T}) where {N,T} = ntuple(i->VecElement{T}(t[i]), N)
 to_tup(v::NTuple{N,VecElement{T}}) where {N,T} = ntuple(i->v[i].value, N)
 to_tup(v::Vec{N,T}) where {N,T} = ntuple(i->v[i], N)
 
-@fastmath @inbounds function findSceneIntersection(r, hittable_list, tmin::F, tmax::F)
+@inline @fastmath @inbounds function findSceneIntersection(r, hittable_list, tmin::F, tmax::F)
     minHitT = tmax
-    minIndex = 0
+    minIndex = Int32(0)
 
-    for i in eachindex(hittable_list.spheres.material)
-        @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[1:4, i] #[4*(i-1)+1:4*i] #vloada(Vec{4, F}, hittable_list.spheres.centre_radius, 1+4*i) |> to_tup
+    for i in Int32(1):Int32(length(hittable_list.spheres.material)) #eachindex(hittable_list.spheres.material)
+        @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[Int32(1):Int32(4), i]
+        # @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[Int32(1):Int32(4), i]
+        # cx, cy, cz, radius = to_tup(vloada(Vec{4, F}, pointer(hittable_list.spheres.centre_radius.a, size(hittable_list.spheres.centre_radius.a)[1]*i-3))) # a field is the actuall array contained in a Const
+        # @inbounds cx, cy, cz, radius = to_tup(vloada(Vec{4, F}, pointer(hittable_list.spheres.centre_radius.a, 4*(i-1)+1))) # a field is the actuall array contained in a Const
+        # @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius.a[4*(i-1)+1:4*i] 
+        # @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[4*(i-1)+1:4*i] # very slow for whatever reason
+        #vloada(Vec{4, F}, hittable_list.spheres.centre_radius, 1+4*i) |> to_tup
         # cx, cy, cz, radius = to_tup(vloada(Vec{4, F}, pointer(hittable_list.spheres.centre_radius[i])))
         # cx, cy, cz, radius = to_tup(to_vec(hittable_list.spheres.centre_radius[i]))
         # cx, cy, cz, radius = hittable_list.spheres.centre_radius[i]
@@ -339,10 +345,10 @@ to_tup(v::Vec{N,T}) where {N,T} = ntuple(i->v[i], N)
 
     if minHitT < tmax
         position = r(minHitT)
-        @inbounds centre_radius = @view hittable_list.spheres.centre_radius[1:4, minIndex]
+        @inbounds centre_radius = @view hittable_list.spheres.centre_radius[Int32(1):Int32(4), minIndex]
         @inbounds material = hittable_list.spheres.material[minIndex]
 
-        @inbounds normal = sphere_normal(Point(centre_radius[1], centre_radius[2], centre_radius[3]), centre_radius[4], position)
+        @inbounds normal = sphere_normal(Point(centre_radius[Int32(1)], centre_radius[Int32(2)], centre_radius[Int32(3)]), centre_radius[Int32(4)], position)
 
         return hit_record(position, normal, material, minHitT)
     else 
@@ -469,6 +475,7 @@ end
 ### Scene Setup
 
 function scene_random_spheres()
+    Random.seed!(1324)
     HittableList = [Sphere([0, 0, -1000], 1000, Material.Lambertian([.5, .5, .5]))]
 
 	for a in -11:10, b in -11:10
@@ -547,7 +554,7 @@ if CUDA.functional()
     function profile(parallel=:GPU)
         scene, spectrum_img, camera = setup(parallel, 1920/2)
 
-        @time NVTX.@range "Range Rendering" begin
+        @time_adapt NVTX.@range "Range Rendering" begin
             CUDA.@profile render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
         end
 
