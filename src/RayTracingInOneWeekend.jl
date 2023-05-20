@@ -300,12 +300,34 @@ to_vec(t::SVector{N,T}) where {N,T} = ntuple(i->VecElement{T}(t[i]), N)
 to_tup(v::NTuple{N,VecElement{T}}) where {N,T} = ntuple(i->v[i].value, N)
 to_tup(v::Vec{N,T}) where {N,T} = ntuple(i->v[i], N)
 
+# for var in [:centre_radius]
+#     val = getfield(scene.spheres, var) |> Array |> vec
+#     gpu_var = Symbol("gpu_$var")
+#     arr_typ = :(CuDeviceArray{$(eltype(val)),$(ndims(val)),CUDA.AS.Constant})
+#     @eval @inline @generated function $gpu_var()
+#         ptr = CUDA.emit_constant_array($(QuoteNode(var)), $val)
+#         Expr(:call, $arr_typ, ptr, $(size(val)))
+#     end
+#     CUDA.@allowscalar gpu_centre_radius() # needs to be called once?
+# end
+
 @inline @fastmath @inbounds function findSceneIntersection(r, hittable_list, tmin::F, tmax::F)
     minHitT = tmax
     minIndex = Int32(0)
+    indexCounter = Int32(0) # 10% speedup
 
     for i in Int32(1):Int32(length(hittable_list.spheres.material)) #eachindex(hittable_list.spheres.material)
-        @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[Int32(1):Int32(4), i]
+        # @inline @inbounds cx = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
+        # @inline @inbounds cy = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
+        # @inline @inbounds cz = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
+        # @inline @inbounds radius = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
+
+        @inline @inbounds cx = gpu_centre_radius()[indexCounter+=Int32(1)]
+        @inline @inbounds cy = gpu_centre_radius()[indexCounter+=Int32(1)]
+        @inline @inbounds cz = gpu_centre_radius()[indexCounter+=Int32(1)]
+        @inline @inbounds radius = gpu_centre_radius()[indexCounter+=Int32(1)]
+
+        # @inbounds cx, cy, cz, radius = gpu_centre_radius()[4*(i-1)+1:4*i]
         # @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[Int32(1):Int32(4), i]
         # cx, cy, cz, radius = to_tup(vloada(Vec{4, F}, pointer(hittable_list.spheres.centre_radius.a, size(hittable_list.spheres.centre_radius.a)[1]*i-3))) # a field is the actuall array contained in a Const
         # @inbounds cx, cy, cz, radius = to_tup(vloada(Vec{4, F}, pointer(hittable_list.spheres.centre_radius.a, 4*(i-1)+1))) # a field is the actuall array contained in a Const
@@ -431,6 +453,8 @@ function CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
 
     scene = hittable_list((centre_radius=centre_radius, material=material))
 
+    # scene = HittableList
+
     if i > size(img)[1] || j > size(img)[2]
         return nothing
     end
@@ -455,20 +479,20 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
     else
         # dev = CUDABackend(true, true) 
         # dev = CUDABackend(false, false)
-        dev = KernelAbstractions.get_backend(img)
+        # dev = KernelAbstractions.get_backend(img)
         # kernel = renderPixel(dev, (8, 8))(img, HittableList, camera, samples_per_pixel, maxDepth, ndrange=size(img)) # slower not sure why, I thought it's equivalent to below line
-        kernel = renderPixel(dev)(img, HittableList, camera, samples_per_pixel, maxDepth, ndrange=size(img), workgroupsize=(8, 8))
-        KernelAbstractions.synchronize(dev)
+        # kernel = renderPixel(dev)(img, HittableList, camera, samples_per_pixel, maxDepth, ndrange=size(img), workgroupsize=(8, 8))
+        # KernelAbstractions.synchronize(dev)
 
-        # CUDA.@sync begin
-        #     numblocks = ceil.(Int, size(img)./8)
-        #     @cuda threads=(8, 8) blocks=numblocks CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
-        #     # ker = @cuda launch=false CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
-        #     # ker(img, scene, camera, 10, 16; threads=(8, 8), blocks=(135, 240))
-        #     # config = launch_configuration(kernel.fun)
-        #     # threads = min(N, config.threads)
-        #     # blocks = cld(N, threads)
-        # end
+        CUDA.@sync begin
+            numblocks = ceil.(Int, size(img)./8)
+            @cuda threads=(8, 8) blocks=numblocks CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+            # ker = @cuda launch=false CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+            # ker(img, scene, camera, 10, 16; threads=(8, 8), blocks=(135, 240))
+            # config = launch_configuration(kernel.fun)
+            # threads = min(N, config.threads)
+            # blocks = cld(N, threads)
+        end
         # spheres::StructVector{Sphere, NamedTuple{(:centre, :radius, :material), Tuple{StructVector{SVector{3, Float32}, NamedTuple{(:x, :y, :z), Tuple{CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}, CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}, CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}}}, Int64}, CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}, CuArray{Material, 1, CUDA.Mem.DeviceBuffer}}}, Int64} = HittableList.spheres
         # map!(img, CartesianIndices(img)) do index
         #     # const_spheres = replace_storage(Base.Experimental.Const, spheres)
