@@ -413,6 +413,35 @@ end
     return ray_color(ray, HittableList, maxDepth)
 end
 
+@kernel function renderPixel(img, @Const(HittableList), @Const(camera), samples_per_pixel, maxDepth)
+    I = @index(Global, Cartesian)
+
+    for sample in 1:samples_per_pixel
+        @inbounds img[I] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, I), camera)
+    end
+    @inbounds img[I] /= samples_per_pixel
+end
+
+function CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+    i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    j = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
+
+    centre_radius = Base.Experimental.Const(HittableList.spheres.centre_radius)
+    material = Base.Experimental.Const(HittableList.spheres.material)
+
+    scene = hittable_list((centre_radius=centre_radius, material=material))
+
+    if i > size(img)[1] || j > size(img)[2]
+        return nothing
+    end
+
+    for sample in Int32(1):Int32(samples_per_pixel)
+        @inbounds img[i, j] += renderRay(scene, maxDepth, pixelWorldPosition(camera, i, j), camera)
+    end
+    @inbounds img[i, j] /= samples_per_pixel
+    return nothing
+end
+
 function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=true)
     if parallel == true
         @sync for j in axes(img, 2)
@@ -424,49 +453,65 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
             end
         end
     else
+        # dev = CUDABackend(true, true) 
+        # dev = CUDABackend(false, false)
+        dev = KernelAbstractions.get_backend(img)
+        # kernel = renderPixel(dev, (8, 8))(img, HittableList, camera, samples_per_pixel, maxDepth, ndrange=size(img)) # slower not sure why, I thought it's equivalent to below line
+        kernel = renderPixel(dev)(img, HittableList, camera, samples_per_pixel, maxDepth, ndrange=size(img), workgroupsize=(8, 8))
+        KernelAbstractions.synchronize(dev)
+
+        # CUDA.@sync begin
+        #     numblocks = ceil.(Int, size(img)./8)
+        #     @cuda threads=(8, 8) blocks=numblocks CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+        #     # ker = @cuda launch=false CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+        #     # ker(img, scene, camera, 10, 16; threads=(8, 8), blocks=(135, 240))
+        #     # config = launch_configuration(kernel.fun)
+        #     # threads = min(N, config.threads)
+        #     # blocks = cld(N, threads)
+        # end
         # spheres::StructVector{Sphere, NamedTuple{(:centre, :radius, :material), Tuple{StructVector{SVector{3, Float32}, NamedTuple{(:x, :y, :z), Tuple{CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}, CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}, CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}}}, Int64}, CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}, CuArray{Material, 1, CUDA.Mem.DeviceBuffer}}}, Int64} = HittableList.spheres
-        map!(img, CartesianIndices(img)) do index
-            # const_spheres = replace_storage(Base.Experimental.Const, spheres)
-            # scene = hittable_list(StructArray(Sphere.(Point.(HittableList.spheres.centre.x, HittableList.spheres.centre.y, HittableList.spheres.centre.z), HittableList.spheres.radius, HittableList.spheres.material), unwrap = F -> (F<:AbstractVector)))
+        # map!(img, CartesianIndices(img)) do index
+        #     # const_spheres = replace_storage(Base.Experimental.Const, spheres)
+        #     # scene = hittable_list(StructArray(Sphere.(Point.(HittableList.spheres.centre.x, HittableList.spheres.centre.y, HittableList.spheres.centre.z), HittableList.spheres.radius, HittableList.spheres.material), unwrap = F -> (F<:AbstractVector)))
 
-            # cols = StructArrays.components(spheres)
-            # for col in cols
-            #     col = Base.Experimental.Const(col)
-            # end
-            # StructArray{T}(newcols)
+        #     # cols = StructArrays.components(spheres)
+        #     # for col in cols
+        #     #     col = Base.Experimental.Const(col)
+        #     # end
+        #     # StructArray{T}(newcols)
 
-            # x = Base.Experimental.Const(HittableList.spheres.centre.x)
-            # y = Base.Experimental.Const(HittableList.spheres.centre.y)
-            # z = Base.Experimental.Const(HittableList.spheres.centre.z)
-            # radius = Base.Experimental.Const(HittableList.spheres.radius)
-            # material = Base.Experimental.Const(HittableList.spheres.material)
+        #     # x = Base.Experimental.Const(HittableList.spheres.centre.x)
+        #     # y = Base.Experimental.Const(HittableList.spheres.centre.y)
+        #     # z = Base.Experimental.Const(HittableList.spheres.centre.z)
+        #     # radius = Base.Experimental.Const(HittableList.spheres.radius)
+        #     # material = Base.Experimental.Const(HittableList.spheres.material)
 
-            # centres = StructVector{Point, NamedTuple{(:x, :y, :z), Tuple{typeof(x), typeof(y), typeof(z)}}, Int64}((x=x, y=y, z=z))
-            # spheres = StructVector{Sphere, NamedTuple{(:centre, :radius, :material), Tuple{typeof(centres), typeof(radius), typeof(material)}}, Int64}((centre=centres, radius=radius, material=material))
+        #     # centres = StructVector{Point, NamedTuple{(:x, :y, :z), Tuple{typeof(x), typeof(y), typeof(z)}}, Int64}((x=x, y=y, z=z))
+        #     # spheres = StructVector{Sphere, NamedTuple{(:centre, :radius, :material), Tuple{typeof(centres), typeof(radius), typeof(material)}}, Int64}((centre=centres, radius=radius, material=material))
 
-            # centres = StructVector{Point, typeof((x=x, y=y, z=z)), Int64}((x=x, y=y, z=z))
-            # spheres = StructVector{Sphere, typeof((centre=centres, radius=radius, material=material)), Int64}((centre=centres, radius=radius, material=material))
+        #     # centres = StructVector{Point, typeof((x=x, y=y, z=z)), Int64}((x=x, y=y, z=z))
+        #     # spheres = StructVector{Sphere, typeof((centre=centres, radius=radius, material=material)), Int64}((centre=centres, radius=radius, material=material))
 
-            # centres = StructArray{Point}(x=x, y=y, z=z)
-            # spheres = StructArray{Sphere}(centre=centres, radius=radius, material=material)
+        #     # centres = StructArray{Point}(x=x, y=y, z=z)
+        #     # spheres = StructArray{Sphere}(centre=centres, radius=radius, material=material)
 
-            centre_radius = Base.Experimental.Const(HittableList.spheres.centre_radius)
-            material = Base.Experimental.Const(HittableList.spheres.material)
+        #     centre_radius = Base.Experimental.Const(HittableList.spheres.centre_radius)
+        #     material = Base.Experimental.Const(HittableList.spheres.material)
 
-            # spheres = StructVector{Sphere, typeof((centre_radius=centre_radius, material=material)), Int64}((centre_radius=centre_radius, material=material))
+        #     # spheres = StructVector{Sphere, typeof((centre_radius=centre_radius, material=material)), Int64}((centre_radius=centre_radius, material=material))
 
-            # scene = hittable_list(spheres)
-            # scene = HittableList
+        #     # scene = hittable_list(spheres)
+        #     # scene = HittableList
 
-            scene = hittable_list((centre_radius=centre_radius, material=material))
+        #     scene = hittable_list((centre_radius=centre_radius, material=material))
 
-            pixel = zeros(Spectrum)
-            for sample in 1:samples_per_pixel
-                pixel += renderRay(scene, maxDepth, pixelWorldPosition(camera, index), camera)
-            end
-            pixel /= samples_per_pixel
-            return pixel
-        end
+        #     pixel = zeros(Spectrum)
+        #     for sample in 1:samples_per_pixel
+        #         pixel += renderRay(scene, maxDepth, pixelWorldPosition(camera, index), camera)
+        #     end
+        #     pixel /= samples_per_pixel
+        #     return pixel
+        # end
     end
 
     return nothing
@@ -599,14 +644,14 @@ function benchmark(;print=false, parallel=true)
         _ => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel) teardown=sleep(1) seconds=20)
     end
 
-    rgb_img = spectrumToRGB(spectrum_img)
     if print
+        rgb_img = spectrumToRGB(spectrum_img)
         rgb_img |> display
     end
     return nothing
 end
 
-function voxel_tracer(parallel=true)
+function voxel_tracer(parallel=true, print=false)
     scene, spectrum_img, camera = setup(parallel, 1200, 12//8)
 
     # @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=50, parallel=parallel)
@@ -615,7 +660,11 @@ function voxel_tracer(parallel=true)
         :false => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50))
         _ => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50) teardown=sleep(1) seconds=20)
     end
-    return spectrumToRGB(spectrum_img)
+    if print
+        rgb_img = spectrumToRGB(spectrum_img)
+        rgb_img |> display
+    end
+    return nothing
 end
 
 # using Cthulhu
