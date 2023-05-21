@@ -2,7 +2,7 @@
 
 julia_version = "1.9.0"
 manifest_format = "2.0"
-project_hash = "62abcd2e8e38c72a3191da0279a46059394da0af"
+project_hash = "95d5d083eeb2c84a457543312251feff136b4dbc"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -77,8 +77,8 @@ version = "0.4.2"
 
 [[deps.CUDA]]
 deps = ["AbstractFFTs", "Adapt", "BFloat16s", "CEnum", "CUDA_Driver_jll", "CUDA_Runtime_Discovery", "CUDA_Runtime_jll", "CompilerSupportLibraries_jll", "ExprTools", "GPUArrays", "GPUCompiler", "KernelAbstractions", "LLVM", "LazyArtifacts", "Libdl", "LinearAlgebra", "Logging", "Preferences", "Printf", "Random", "Random123", "RandomNumbers", "Reexport", "Requires", "SparseArrays", "SpecialFunctions", "UnsafeAtomicsLLVM"]
-git-tree-sha1 = "66525838a6183f0b0513a78ed56bc82fdd0e47a8"
-repo-rev = "patch-1"
+git-tree-sha1 = "09a6936bda151c140d0b7b998c3abe0aae64403a"
+repo-rev = "fork-master"
 repo-url = "https://github.com/Zentrik/CUDA.jl"
 uuid = "052768ef-5323-5732-b1bb-66c8b64840ba"
 version = "4.2.0"
