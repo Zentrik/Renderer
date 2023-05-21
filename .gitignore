@@ -5,3 +5,4 @@ GammaTesting.jl
 
 in_one_weekend/target
 .vscode/
+*.cmd
