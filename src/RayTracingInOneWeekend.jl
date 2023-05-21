@@ -311,21 +311,88 @@ to_tup(v::Vec{N,T}) where {N,T} = ntuple(i->v[i], N)
 #     CUDA.@allowscalar gpu_centre_radius() # needs to be called once?
 # end
 
+# CUDA.alignment(::CuDeviceArray{Float32, 1, CUDA.AS.Constant}) = 16 # is this correct/safe?
+# CUDA.alignment(::CuDeviceArray{Float32, 2, CUDA.AS.Global}) = 16 # is this correct/safe?
+
+import LLVM.Interop: @typed_ccall
+using Core: LLVMPtr
+# ldg is for loading globals with cache
+@inline function pointerref_ldg_vectorized(base_ptr::LLVMPtr{Float32,CUDA.AS.Global}, i::Integer)
+    offset = i-one(i) # in elements
+    ptr = base_ptr + offset*sizeof(Float32)
+    @typed_ccall("llvm.nvvm.ldg.global.f.v4f32.p1v4f32", llvmcall, NTuple{4, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Global}, Int32), ptr, Val(16))
+end
+
+# @inline function pointerref_ldg_vectorized(base_ptr::LLVMPtr{Float32,CUDA.AS.Constant}, i::Integer)
+#     offset = i-one(i) # in elements
+#     ptr = base_ptr + offset*sizeof(Float32)
+#     @typed_ccall("load <4 x float> addrspace(4)*", llvmcall, NTuple{4, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Constant}, Int32), ptr, Val(16))
+# end
+
+using LLVM
+using LLVM.Interop
+@generated function pointerref_vectorized(ptr::LLVMPtr{Float32,CUDA.AS.Constant}, i::I) where I
+    T = Float32
+    VT = NTuple{4, Base.VecElement{Float32}}
+    A = CUDA.AS.Constant
+    align = 16
+
+    sizeof(T) == 0 && return T.instance
+    @dispose ctx=Context() begin
+        eltyp = convert(LLVMType, VT; ctx)
+
+        T_idx = convert(LLVMType, I; ctx)
+        T_ptr = convert(LLVMType, ptr; ctx)
+
+        T_typed_ptr = LLVM.PointerType(eltyp, A)
+
+        # create a function
+        param_types = [T_ptr, T_idx]
+        llvm_f, _ = create_function(eltyp, param_types)
+
+        # generate IR
+        @dispose builder=IRBuilder(ctx) begin
+            entry = BasicBlock(llvm_f, "entry"; ctx)
+            position!(builder, entry)
+            ptr = if supports_typed_pointers(ctx)
+                typed_ptr = bitcast!(builder, parameters(llvm_f)[1], T_typed_ptr)
+                inbounds_gep!(builder, eltyp, typed_ptr, [parameters(llvm_f)[2]])
+            else
+                inbounds_gep!(builder, eltyp, parameters(llvm_f)[1], [parameters(llvm_f)[2]])
+            end
+            ld = load!(builder, eltyp, ptr)
+            if A != 0
+                metadata(ld)[LLVM.MD_tbaa] = tbaa_addrspace(A; ctx)
+            end
+            alignment!(ld, align)
+
+            ret!(builder, ld)
+        end
+
+        call_function(llvm_f, VT, Tuple{LLVMPtr{T,A}, I}, :ptr, :(i-one(I)))
+    end
+end
+
 @inline @fastmath @inbounds function findSceneIntersection(r, hittable_list, tmin::F, tmax::F)
     minHitT = tmax
     minIndex = Int32(0)
-    indexCounter = Int32(0) # 10% speedup
+    indexCounter = Int32(0)
 
     for i in Int32(1):Int32(length(hittable_list.spheres.material)) #eachindex(hittable_list.spheres.material)
+        cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), i))
+
+        # cx, cy, cz, radius = to_tup(pointerref_ldg_vectorized(pointer(hittable_list.spheres.centre_radius.a), Int32(4)*(i-Int32(1))+Int32(1)))
+        # indexCounter += Int32(4)
+        
         # @inline @inbounds cx = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
         # @inline @inbounds cy = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
         # @inline @inbounds cz = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
         # @inline @inbounds radius = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
 
-        @inline @inbounds cx = gpu_centre_radius()[indexCounter+=Int32(1)]
-        @inline @inbounds cy = gpu_centre_radius()[indexCounter+=Int32(1)]
-        @inline @inbounds cz = gpu_centre_radius()[indexCounter+=Int32(1)]
-        @inline @inbounds radius = gpu_centre_radius()[indexCounter+=Int32(1)]
+        # @inline @inbounds cx = gpu_centre_radius()[indexCounter+=Int32(1)]
+        # @inline @inbounds cy = gpu_centre_radius()[indexCounter+=Int32(1)]
+        # @inline @inbounds cz = gpu_centre_radius()[indexCounter+=Int32(1)]
+        # @inline @inbounds radius = gpu_centre_radius()[indexCounter+=Int32(1)]
 
         # @inbounds cx, cy, cz, radius = gpu_centre_radius()[4*(i-1)+1:4*i]
         # @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[Int32(1):Int32(4), i]
