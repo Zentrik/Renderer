@@ -376,7 +376,7 @@ end
 @inline @fastmath @inbounds function findSceneIntersection(r, hittable_list, tmin::F, tmax::F)
     minHitT = tmax
     minIndex = Int32(0)
-    indexCounter = Int32(0)
+    # indexCounter = Int32(0)
 
     for i in Int32(1):Int32(length(hittable_list.spheres.material)) #eachindex(hittable_list.spheres.material)
         cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), i))
@@ -545,15 +545,16 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
         end
     else
         # dev = CUDABackend(true, true) 
-        # dev = CUDABackend(false, false)
+        # dev = CUDABackend(false, true)
         # dev = KernelAbstractions.get_backend(img)
         # kernel = renderPixel(dev, (8, 8))(img, HittableList, camera, samples_per_pixel, maxDepth, ndrange=size(img)) # slower not sure why, I thought it's equivalent to below line
         # kernel = renderPixel(dev)(img, HittableList, camera, samples_per_pixel, maxDepth, ndrange=size(img), workgroupsize=(8, 8))
         # KernelAbstractions.synchronize(dev)
 
         CUDA.@sync begin
-            numblocks = ceil.(Int, size(img)./8)
-            @cuda threads=(8, 8) blocks=numblocks always_inline=true CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+            nthreads = (8, 8)
+            numblocks = ceil.(Int, size(img)./nthreads)
+            @cuda threads=nthreads blocks=numblocks always_inline=true CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
             # ker = @cuda launch=false always_inline=true CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
             # ker(img, scene, camera, 10, 16; threads=(8, 8), blocks=(135, 240))
             # config = launch_configuration(kernel.fun)
