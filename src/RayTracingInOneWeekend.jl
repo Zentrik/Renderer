@@ -434,10 +434,10 @@ end
 
     if minHitT < tmax
         position = r(minHitT)
-        @inbounds centre_radius = @view hittable_list.spheres.centre_radius[Int32(1):Int32(4), minIndex]
+        cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), minIndex))
         @inbounds material = hittable_list.spheres.material[minIndex]
 
-        @inbounds normal = sphere_normal(Point(centre_radius[Int32(1)], centre_radius[Int32(2)], centre_radius[Int32(3)]), centre_radius[Int32(4)], position)
+        @inbounds normal = sphere_normal(Point(cx, cy, cz), radius, position)
 
         return hit_record(position, normal, material, minHitT)
     else 
@@ -553,8 +553,8 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
 
         CUDA.@sync begin
             numblocks = ceil.(Int, size(img)./8)
-            @cuda threads=(8, 8) blocks=numblocks CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
-            # ker = @cuda launch=false CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+            @cuda threads=(8, 8) blocks=numblocks always_inline=true CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+            # ker = @cuda launch=false always_inline=true CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
             # ker(img, scene, camera, 10, 16; threads=(8, 8), blocks=(135, 240))
             # config = launch_configuration(kernel.fun)
             # threads = min(N, config.threads)
