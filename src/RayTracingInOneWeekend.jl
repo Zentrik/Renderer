@@ -13,8 +13,6 @@ end
 
 # SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
 
-Fast = false
-
 const F = Float32
 
 ### TYPES
@@ -60,28 +58,6 @@ function Sphere(centre, radius, material)
 end
 
 @fastmath sphere_normal(centre, radius, position) = (position - centre) / radius
-@fastmath sphere_normal(sphere, position) = sphere_normal(sphere.centre, sphere.radius, position)
-
-# function StructArrays.staticschema(::Type{Point})
-#     # Define the desired names and eltypes of the "fields"
-#     return NamedTuple{(:x, :y, :z), fieldtypes(Point)...}
-# end
-
-# StructArrays.component(m::Point, key::Symbol) = getproperty(m, key)
-# StructArrays.createinstance(::Type{Point}, args...) = Point(args)
-
-# function StructArrays.staticschema(::Type{Sphere})
-#     # Define the desired names and eltypes of the "fields"
-#     return NamedTuple{(:centre_radius, :material), Tuple{SVector{4, F}, Material}}
-# end
-
-# function StructArrays.component(m::Sphere, key::Symbol)
-#     if key == :centre_radius
-#         return SVector{4, F}(m.centre..., m.radius)
-#     end
-#     return getproperty(m, key)
-# end
-# StructArrays.createinstance(::Type{Sphere}, args...) = Sphere(args[1][1:3], args[1][4], args[2])
 
 @kwdef struct hittable_list{T}
     spheres::T = []
@@ -128,15 +104,11 @@ end
 @fastmath pixelWorldPosition(camera, x, y) = camera.upper_left_corner + (y - 1) * camera.right + (x - 1) * camera.down
 
 @inline @fastmath norm2(x) = x ⋅ x
-# probably doesn't do anything, StaticArrays should be aggressively unrolling anyways
-@inline @fastmath norm2(x::SVector{3}) = x[1] * x[1] + x[2] * x[2] + x[3] * x[3]
 
 @inline @fastmath normalize_fast(x) = x * (1 / sqrt(norm2(x)))
 
 if CUDA.functional()
-    # @inline @fastmath normalize_fast(x) = x * CUDA.rsqrt(norm2(x))
     @inline @fastmath CUDA.@device_override normalize_fast(x) = x * CUDA.rsqrt(norm2(x))
-    # does this even get called, dispatch should still work even if its actually a CuArray
     @inline @fastmath CUDA.@device_override normalize_fast(x::SVector{3}) = x * CUDA.rnorm3df(x[1], x[2], x[3])
 end
 
@@ -145,88 +117,31 @@ function world_color(ray)
     return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0)
 end
 
-@static if Fast
-    # @inline @fastmath random_in_unit_disk() = normalize_fast(SVector{2, F}(randn(), randn()))
-
-    @inline @fastmath random_in_unit_disk() = normalize_fast(randn(SVector{2, F}))
-
-    @inline @fastmath function random_in_unit_sphere()
-        while true
-            sample = rand(Point) * 2 .- 1
-            # sample = Point(rand(F) * 2 - 1, rand(F) * 2 - 1, rand(F) * 2 - 1)
-            if norm2(sample) < 1
-                return sample
-            end
+@inline @fastmath function random_in_unit_disk()
+    while true
+        p = rand(SVector{2, F}) * 2 .- 1
+        if norm2(p) < 1
+            return p
         end
     end
+end
 
-    @inline @fastmath random_on_unit_sphere_surface() = normalize_fast(Point(randn(), randn(), randn()))
-else
-    @inline @fastmath function random_in_unit_disk()
-        # while true
-        #     p = rand(SVector{2, F}) * 2 .- 1
-        #     if norm2(p) < 1
-        #         return p
-        #     end
-        # end
-        θ = 2*π*rand(F)
-        r = sqrt(rand(F))
-        sinθ, cosθ = sincos(θ)
-        SVector{2, F}(r*sinθ, r*cosθ)
+@inline @fastmath function random_in_unit_sphere()
+    while true
+        sample = rand(Point) * 2 .- 1
+        if norm2(sample) < 1
+            return sample
+        end
     end
+end
 
-    @inline @fastmath function random_in_unit_sphere()
-        # while true
-        #     sample = rand(Point) * 2 .- 1
-        #     # sample = @inline rand(Point) * 2 .- 1
-        #     if norm2(sample) < 1
-        #         return sample
-        #     end
-        # end
-
-        # return normalize_fast(randn(Point)) * cbrt(rand(F))
-
-        z = 1 - 2 * rand(F)
-        r = sqrt(1 - z*z)
-        ϕ = 2 * π * rand(F)
-        sinϕ, cosϕ = sincos(ϕ)
-        return Point(r * cosϕ, r * sinϕ, z) * cbrt(rand(F))
-    end
-
-    @inline @fastmath function random_on_unit_sphere_surface()
-        # tmp = random_in_unit_sphere()
-        # return normalize_fast(tmp)
-
-        # while true
-        #     # sample = rand(Point) * 2 .- 1
-        #     sample = @inline rand(Point) * 2 .- 1
-        #     length2 = norm2(sample)
-        #     if length2 < 1
-        #         return sample * CUDA.rsqrt(length2)
-        #     end
-        # end
-
-        # return Point(normalize_fast(CUDA.randn(F, 3)))
- 
-        # https://github.com/mmp/pbrt-v4/blob/c4baa534042e2ec4eb245924efbcef477e096389/src/pbrt/util/sampling.h#L391
-        z = 1 - 2 * rand(F)
-        r = sqrt(1 - z*z)
-        ϕ = 2 * π * rand(F)
-        sinϕ, cosϕ = sincos(ϕ)
-        return Point(r * cosϕ, r * sinϕ, z)
-
-        # ϕ, z = rand(F, 2)
-        # z = 1 - 2 * z
-        # r = sqrt(1 - z*z)
-        # ϕ = 2 * π * ϕ
-        # sinϕ, cosϕ = sincos(ϕ)
-        # return Point(r * cosϕ, r * sinϕ, z)
-
-        # z = 1 .- 2 * CUDA.rand(F, 1)
-        # r = sqrt.(1 .- z.*z)
-        # ϕ = 2 * π * CUDA.rand(F, 1)
-        # sinϕ, cosϕ = sincos.(ϕ)
-        # return Point(r .* sincos.(ϕ), z)
+@inline @fastmath function random_on_unit_sphere_surface()
+    while true
+        sample = rand(Point) * 2 .- 1
+        length2 = norm2(sample)
+        if length2 < 1
+            return sample * CUDA.rsqrt(length2)
+        end
     end
 end
 
@@ -296,23 +211,7 @@ end
 ### Render Loop
 
 # https://discourse.julialang.org/t/help-defining-masked-vload-and-vstore-operations-for-sarrays-or-other-isbits-structs-using-llvmcall/17291
-to_vec(t::SVector{N,T}) where {N,T} = ntuple(i->VecElement{T}(t[i]), N)
 to_tup(v::NTuple{N,VecElement{T}}) where {N,T} = ntuple(i->v[i].value, N)
-to_tup(v::Vec{N,T}) where {N,T} = ntuple(i->v[i], N)
-
-# for var in [:centre_radius]
-#     val = getfield(scene.spheres, var) |> Array |> vec
-#     gpu_var = Symbol("gpu_$var")
-#     arr_typ = :(CuDeviceArray{$(eltype(val)),$(ndims(val)),CUDA.AS.Constant})
-#     @eval @inline @generated function $gpu_var()
-#         ptr = CUDA.emit_constant_array($(QuoteNode(var)), $val)
-#         Expr(:call, $arr_typ, ptr, $(size(val)))
-#     end
-#     CUDA.@allowscalar gpu_centre_radius() # needs to be called once?
-# end
-
-# CUDA.alignment(::CuDeviceArray{Float32, 1, CUDA.AS.Constant}) = 16 # is this correct/safe?
-# CUDA.alignment(::CuDeviceArray{Float32, 2, CUDA.AS.Global}) = 16 # is this correct/safe?
 
 import LLVM.Interop: @typed_ccall
 using Core: LLVMPtr
@@ -322,12 +221,6 @@ using Core: LLVMPtr
     ptr = base_ptr + offset*sizeof(Float32)
     @typed_ccall("llvm.nvvm.ldg.global.f.v4f32.p1v4f32", llvmcall, NTuple{4, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Global}, Int32), ptr, Val(16))
 end
-
-# @inline function pointerref_ldg_vectorized(base_ptr::LLVMPtr{Float32,CUDA.AS.Constant}, i::Integer)
-#     offset = i-one(i) # in elements
-#     ptr = base_ptr + offset*sizeof(Float32)
-#     @typed_ccall("load <4 x float> addrspace(4)*", llvmcall, NTuple{4, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Constant}, Int32), ptr, Val(16))
-# end
 
 using LLVM
 using LLVM.Interop
@@ -376,34 +269,10 @@ end
 @inline @fastmath @inbounds function findSceneIntersection(r, hittable_list, tmin::F, tmax::F)
     minHitT = tmax
     minIndex = Int32(0)
-    # indexCounter = Int32(0)
 
-    for i in Int32(1):Int32(length(hittable_list.spheres.material)) #eachindex(hittable_list.spheres.material)
+    for i in Int32(1):Int32(length(hittable_list.spheres.material))
         cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), i))
 
-        # cx, cy, cz, radius = to_tup(pointerref_ldg_vectorized(pointer(hittable_list.spheres.centre_radius.a), Int32(4)*(i-Int32(1))+Int32(1)))
-        # indexCounter += Int32(4)
-        
-        # @inline @inbounds cx = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
-        # @inline @inbounds cy = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
-        # @inline @inbounds cz = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
-        # @inline @inbounds radius = hittable_list.spheres.centre_radius[indexCounter+=Int32(1)]
-
-        # @inline @inbounds cx = gpu_centre_radius()[indexCounter+=Int32(1)]
-        # @inline @inbounds cy = gpu_centre_radius()[indexCounter+=Int32(1)]
-        # @inline @inbounds cz = gpu_centre_radius()[indexCounter+=Int32(1)]
-        # @inline @inbounds radius = gpu_centre_radius()[indexCounter+=Int32(1)]
-
-        # @inbounds cx, cy, cz, radius = gpu_centre_radius()[4*(i-1)+1:4*i]
-        # @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[Int32(1):Int32(4), i]
-        # cx, cy, cz, radius = to_tup(vloada(Vec{4, F}, pointer(hittable_list.spheres.centre_radius.a, size(hittable_list.spheres.centre_radius.a)[1]*i-3))) # a field is the actuall array contained in a Const
-        # @inbounds cx, cy, cz, radius = to_tup(vloada(Vec{4, F}, pointer(hittable_list.spheres.centre_radius.a, 4*(i-1)+1))) # a field is the actuall array contained in a Const
-        # @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius.a[4*(i-1)+1:4*i] 
-        # @inbounds cx, cy, cz, radius = @view hittable_list.spheres.centre_radius[4*(i-1)+1:4*i] # very slow for whatever reason
-        #vloada(Vec{4, F}, hittable_list.spheres.centre_radius, 1+4*i) |> to_tup
-        # cx, cy, cz, radius = to_tup(vloada(Vec{4, F}, pointer(hittable_list.spheres.centre_radius[i])))
-        # cx, cy, cz, radius = to_tup(to_vec(hittable_list.spheres.centre_radius[i]))
-        # cx, cy, cz, radius = hittable_list.spheres.centre_radius[i]
         cox = cx - r.origin.x
         coy = cy - r.origin.y
         coz = cz - r.origin.z
@@ -419,7 +288,7 @@ end
         isDiscriminantPositive = quarter_discriminant > 0
 
         if isDiscriminantPositive
-            @inline @fastmath sqrtd = sqrt(quarter_discriminant) # When using fastmath, negative values just give 0
+            sqrtd = sqrt(quarter_discriminant)
     
             root = neg_half_b - sqrtd
             root2 = neg_half_b + sqrtd
@@ -437,7 +306,7 @@ end
         cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), minIndex))
         @inbounds material = hittable_list.spheres.material[minIndex]
 
-        @inbounds normal = sphere_normal(Point(cx, cy, cz), radius, position)
+        @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
 
         return hit_record(position, normal, material, minHitT)
     else 
@@ -468,16 +337,6 @@ end
                 Material.Dielectric(attenuation, ior) => (glass(r, record.normal, ior), true, attenuation)
                 Material.Metal(attenuation, fuzz) => metalTest(r, record, attenuation, fuzz)
             end
-
-            # @fastmath @inline (direction, scatterAgain, attenuation) = @match record.material begin
-            #     Material.Lambertian(attenuation) => (lambertian(r, record.normal), true, attenuation)
-            #     Material.Dielectric(attenuation, ior) => (lambertian(r, record.normal), true, attenuation)
-            #     Material.Metal(attenuation, fuzz) => (lambertian(r, record.normal), true, attenuation)
-            # end
-
-            # direction = lambertian(r, record.normal)
-            # scatterAgain = true
-            # attenuation = Spectrum(1, 0, 0)
 
             if !scatterAgain
                 return zeros(Spectrum)
@@ -519,6 +378,7 @@ function CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
     material = Base.Experimental.Const(HittableList.spheres.material)
 
     scene = hittable_list((centre_radius=centre_radius, material=material))
+    scene = hittable_list((material=material,))
 
     # scene = HittableList
 
@@ -543,14 +403,7 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
                 @inbounds img[i, j] /= samples_per_pixel
             end
         end
-    else
-        # dev = CUDABackend(true, true) 
-        # dev = CUDABackend(false, true)
-        # dev = KernelAbstractions.get_backend(img)
-        # kernel = renderPixel(dev, (8, 8))(img, HittableList, camera, samples_per_pixel, maxDepth, ndrange=size(img)) # slower not sure why, I thought it's equivalent to below line
-        # kernel = renderPixel(dev)(img, HittableList, camera, samples_per_pixel, maxDepth, ndrange=size(img), workgroupsize=(8, 8))
-        # KernelAbstractions.synchronize(dev)
-
+    elseif parallel == :GPU
         CUDA.@sync begin
             nthreads = (8, 8)
             numblocks = ceil.(Int, size(img)./nthreads)
@@ -561,49 +414,15 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
             # threads = min(N, config.threads)
             # blocks = cld(N, threads)
         end
-        # spheres::StructVector{Sphere, NamedTuple{(:centre, :radius, :material), Tuple{StructVector{SVector{3, Float32}, NamedTuple{(:x, :y, :z), Tuple{CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}, CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}, CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}}}, Int64}, CuArray{Float32, 1, CUDA.Mem.DeviceBuffer}, CuArray{Material, 1, CUDA.Mem.DeviceBuffer}}}, Int64} = HittableList.spheres
-        # map!(img, CartesianIndices(img)) do index
-        #     # const_spheres = replace_storage(Base.Experimental.Const, spheres)
-        #     # scene = hittable_list(StructArray(Sphere.(Point.(HittableList.spheres.centre.x, HittableList.spheres.centre.y, HittableList.spheres.centre.z), HittableList.spheres.radius, HittableList.spheres.material), unwrap = F -> (F<:AbstractVector)))
-
-        #     # cols = StructArrays.components(spheres)
-        #     # for col in cols
-        #     #     col = Base.Experimental.Const(col)
-        #     # end
-        #     # StructArray{T}(newcols)
-
-        #     # x = Base.Experimental.Const(HittableList.spheres.centre.x)
-        #     # y = Base.Experimental.Const(HittableList.spheres.centre.y)
-        #     # z = Base.Experimental.Const(HittableList.spheres.centre.z)
-        #     # radius = Base.Experimental.Const(HittableList.spheres.radius)
-        #     # material = Base.Experimental.Const(HittableList.spheres.material)
-
-        #     # centres = StructVector{Point, NamedTuple{(:x, :y, :z), Tuple{typeof(x), typeof(y), typeof(z)}}, Int64}((x=x, y=y, z=z))
-        #     # spheres = StructVector{Sphere, NamedTuple{(:centre, :radius, :material), Tuple{typeof(centres), typeof(radius), typeof(material)}}, Int64}((centre=centres, radius=radius, material=material))
-
-        #     # centres = StructVector{Point, typeof((x=x, y=y, z=z)), Int64}((x=x, y=y, z=z))
-        #     # spheres = StructVector{Sphere, typeof((centre=centres, radius=radius, material=material)), Int64}((centre=centres, radius=radius, material=material))
-
-        #     # centres = StructArray{Point}(x=x, y=y, z=z)
-        #     # spheres = StructArray{Sphere}(centre=centres, radius=radius, material=material)
-
-        #     centre_radius = Base.Experimental.Const(HittableList.spheres.centre_radius)
-        #     material = Base.Experimental.Const(HittableList.spheres.material)
-
-        #     # spheres = StructVector{Sphere, typeof((centre_radius=centre_radius, material=material)), Int64}((centre_radius=centre_radius, material=material))
-
-        #     # scene = hittable_list(spheres)
-        #     # scene = HittableList
-
-        #     scene = hittable_list((centre_radius=centre_radius, material=material))
-
-        #     pixel = zeros(Spectrum)
-        #     for sample in 1:samples_per_pixel
-        #         pixel += renderRay(scene, maxDepth, pixelWorldPosition(camera, index), camera)
-        #     end
-        #     pixel /= samples_per_pixel
-        #     return pixel
-        # end
+    else
+        map!(img, CartesianIndices(img)) do index
+            pixel = zeros(Spectrum)
+            for sample in 1:samples_per_pixel
+                pixel += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera)
+            end
+            pixel /= samples_per_pixel
+            return pixel
+        end
     end
 
     return nothing
@@ -649,6 +468,8 @@ end
 ### Run Code
 spectrumToRGB(img) = map(x -> RGB(sqrt.(x)...), img |> Array)
 
+gpu_centre_radius() = 0
+
 function setup(parallel, resolution=1920/4, aspect_ratio=16//9)
     scene = scene_random_spheres()
     spectrum_img = zeros(Spectrum, reverse(imagesize(resolution, aspect_ratio))...)
@@ -658,8 +479,31 @@ function setup(parallel, resolution=1920/4, aspect_ratio=16//9)
         scene = hittable_list((centre_radius=CuArray(stack(x -> [x[i] for i in 1:4], scene.spheres.centre_radius)), material=CuArray(scene.spheres.material)))
         # scene = hittable_list(CUDA.@allowscalar replace_storage(CuArray, scene.spheres))
         spectrum_img = CuArray(spectrum_img)
+
+        if gpu_centre_radius() == 0
+            for var in [:centre_radius]
+                val = getfield(scene.spheres, var) |> Array |> vec
+                gpu_var = Symbol("gpu_$var")
+                arr_typ = :(CuDeviceArray{$(eltype(val)),$(ndims(val)),CUDA.AS.Constant})
+                @eval @inline @generated function $gpu_var()
+                    ptr = CUDA.emit_constant_array($(QuoteNode(var)), $val)
+                    Expr(:call, $arr_typ, ptr, $(size(val)))
+                end
+            end
+
+        end
     else
+        throw("Rendering not supported on CPU")
         scene = hittable_list((centre_radius=(stack(x -> [x[i] for i in 1:4], scene.spheres.centre_radius)), material=(scene.spheres.material)))
+        # if gpu_centre_radius() == 0
+        #     for var in [:centre_radius]
+        #         val = getfield(scene.spheres, var) |> Array |> vec
+        #         gpu_var = Symbol("gpu_$var")
+        #         @eval @inline @generated function $gpu_var()
+        #             Expr(:call, $(typeof(val)), $(pointer(val)), $(size(val)))
+        #         end
+        #     end
+        # end
     end
 
     return scene, spectrum_img, camera
