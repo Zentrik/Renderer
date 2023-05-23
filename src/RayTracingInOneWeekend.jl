@@ -326,16 +326,29 @@ end
     return (tmp[1], tmp[2], attenuation)
 end
 
-@inbounds @fastmath function ray_color(r, depth, tmin=F(1e-4), tmax=F(Inf))
-    accumulated_attenuation = ones(Spectrum)
+@inbounds @fastmath function ray_color(pixel_position, camera, samples_per_pixel, max_depth, tmin=F(1e-4), tmax=F(Inf))
+    samples_done = 0
+    depth = 1
 
-    for i in 1:depth
+    sample_attenuation = ones(Spectrum)
+    total_attenuation = zeros(Spectrum)
+
+    r = generateRay(pixel_position, camera)
+
+    while samples_done < samples_per_pixel
         record = findSceneIntersection(r, tmin, tmax)
 
-        @smart_assert !any(isnan.(accumulated_attenuation)) accumulated_attenuation
+        if depth == max_depth
+            depth = 0
+            sample_attenuation = zeros(Spectrum)
+        end
+
+        @smart_assert !any(isnan.(sample_attenuation)) sample_attenuation
         if record.t == tmax # nothing hit, t from initialRecord
             @smart_assert all(world_color(r) .>= 0)
-            return accumulated_attenuation .* world_color(r)
+            sample_attenuation = sample_attenuation .* world_color(r)
+
+            depth = 0
         else
             @smart_assert isapprox(norm(record.normal), 1; atol=F(1e-2)) record.normal
 
@@ -354,26 +367,34 @@ end
             end
 
             if !scatterAgain
-                return zeros(Spectrum)
+                depth = 0
+                sample_attenuation = zeros(Spectrum)
+            else
+                r = Ray(record.p, direction)
+                sample_attenuation = sample_attenuation .* attenuation
             end
-
-            r = Ray(record.p, direction)
-            accumulated_attenuation = accumulated_attenuation .* attenuation
         end
+
+        if depth == 0
+            total_attenuation += sample_attenuation
+            sample_attenuation = ones(Spectrum)
+
+            r = generateRay(pixel_position, camera)
+            samples_done += 1
+        end
+        depth += 1
     end
 
-    return zeros(Spectrum)
+    return total_attenuation / samples_done
 end
 
-@fastmath function renderRay(maxDepth, pixel_position, camera)
+@fastmath function generateRay(pixel_position, camera)
     random_pixel_position = pixel_position + rand(F) * camera.right + rand(F) * camera.down
 
     defocus_random = camera.lens_radius * random_in_unit_disk()
     defocus_offset = defocus_random[1] * camera.u + defocus_random[2] * camera.v
 
-    ray = Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
-
-    return ray_color(ray, maxDepth)
+    return Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
 end
 
 function CUDAKernel(img, camera, samples_per_pixel, maxDepth)
@@ -384,10 +405,7 @@ function CUDAKernel(img, camera, samples_per_pixel, maxDepth)
         return nothing
     end
 
-    for sample in Int32(1):Int32(samples_per_pixel)
-        @inbounds img[i, j] += renderRay(maxDepth, pixelWorldPosition(camera, i, j), camera)
-    end
-    @inbounds img[i, j] /= samples_per_pixel
+    @inbounds img[i, j] = ray_color(pixelWorldPosition(camera, i, j), camera, samples_per_pixel, maxDepth)
     return nothing
 end
 
@@ -590,5 +608,5 @@ end
 # try
 #     test(:GPU);
 # catch err
-#     code_warntype(err, interactive=true)
+#     code_typed(err, interactive=true)
 # end
