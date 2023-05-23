@@ -1,12 +1,15 @@
 # This tries to stay faithful to the book's code
 # using Revise
-using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, MLStyle, SmartAsserts, KernelAbstractions, CUDA, Adapt, NVTX, SIMD, Random
-using Expronicon.ADT: @adt
+using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, SmartAsserts, CUDA, Random, MLStyle, LLVM
+using Core: LLVMPtr
+using LLVM.Interop
+# import LLVM.Interop: @typed_ccall
 
 if CUDA.functional()
     CUDA.allowscalar(false)
     const var"@time_adapt" = CUDA.var"@time"
     SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
+    # CUDA.math_mode!(CUDA.FAST_MATH; precision=:Float16)
 else
     const var"@time_adapt" = var"@time"
 end
@@ -25,20 +28,14 @@ const Spectrum = SVector{3, F}
     @smart_assert isapprox(norm(direction), 1, atol=F(1e-2)) "Ray direction not normalised for Ray with origin $origin and direction $direction"
 end
 @inline (ray::Ray)(t) = ray.origin + t * ray.direction
-
-@adt Material begin
-    struct Lambertian
-        attenuation::Spectrum = ones(Spectrum)
-    end
-    struct Dielectric
-        attenuation::Spectrum = ones(Spectrum)
-        ior::F = 3//2
-    end
-    struct Metal
-        attenuation::Spectrum = ones(Spectrum)
-        fuzz::F = 0
-    end
+struct Material
+    type::UInt32
+    data::SVector{4, F} # attenuation first, then any other float
 end
+Material(type, attenuation, float) = Material(type, SVector{4, F}(attenuation..., float))
+Lambertian(attenuation=ones(Spectrum), padding=0) = Material(0, attenuation, padding)
+Dielectric(attenuation=ones(Spectrum), ior=3//2) = Material(1, attenuation, ior)
+Metal(attenuation=ones(Spectrum), fuzz=0) = Material(2, attenuation, fuzz)
 
 struct hit_record
     p::Point
@@ -50,19 +47,19 @@ end
 abstract type Primitive end
 
 @kwdef struct Sphere <: Primitive
-    centre_radius::Vec{4, F} = Vec{4, F}((0, 0, 0, 0.5)) #[zeros(F, 3); 0.5f0]
-    material::Material = Material.Lambertian()
+    centre_radius::SVector{4, F} = SVector{4, F}(0, 0, 0, 1//2)
+    material::Material = Lambertian()
 end
 function Sphere(centre, radius, material)
-    Sphere(Vec{4, F}(tuple([centre; radius]...)), material)
+    Sphere(SVector{4, F}(centre..., radius), material)
 end
 
-@fastmath sphere_normal(centre, radius, position) = (position - centre) / radius
+@fastmath sphere_normal(centre, radius, position) = (position - centre) / (radius)
 
 @kwdef struct hittable_list{T}
     spheres::T = []
 end
-Adapt.@adapt_structure hittable_list
+# Adapt.@adapt_structure hittable_list
 
 imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
 
@@ -127,23 +124,36 @@ end
 end
 
 @inline @fastmath function random_in_unit_sphere()
-    while true
-        sample = rand(Point) * 2 .- 1
-        if norm2(sample) < 1
-            return sample
-        end
-    end
+    # while true
+    #     sample = rand(Point) * 2 .- 1
+    #     if norm2(sample) < 1
+    #         return sample
+    #     end
+    # end
+    z = 1 - 2 * rand(F)
+    r = sqrt(max(0, 1 - z*z))
+    ϕ = 2 * π * rand(F)
+    sinϕ, cosϕ = sincos(ϕ)
+    return Point(r * cosϕ, r * sinϕ, z) * cbrt(rand(F))
 end
 
 @inline @fastmath function random_on_unit_sphere_surface()
-    while true
-        sample = rand(Point) * 2 .- 1
-        length2 = norm2(sample)
-        if length2 < 1
-            return sample * CUDA.rsqrt(length2)
-        end
-    end
+    # while true
+    #     sample = rand(Point) * 2 .- 1
+    #     length2 = norm2(sample)
+    #     if length2 < 1
+    #         return sample * CUDA.rsqrt(length2)
+    #     end
+    # end
+    # https://github.com/mmp/pbrt-v4/blob/c4baa534042e2ec4eb245924efbcef477e096389/src/pbrt/util/sampling.h#L391
+    z = 1 - 2 * rand(F)
+    r = sqrt(max(0, 1 - z*z))
+    ϕ = 2 * π * rand(F)
+    sinϕ, cosϕ = sincos(ϕ)
+    return Point(r * cosϕ, r * sinϕ, z)
 end
+
+### Materials
 
 @fastmath function reflect(ray, n⃗, fuzz=0)
     direction = ray.direction - 2(ray.direction ⋅ n⃗) * n⃗
@@ -156,16 +166,14 @@ end
     return normalize_fast(direction)
 end
 
-### Materials
+@fastmath function metal(ray, n⃗, fuzz=0)
+    @inline scattered = reflect(ray, n⃗, fuzz)
+    return scattered, scattered ⋅ n⃗ > 0 # check if scattered direction is into the object
+end
 
 @fastmath function shick(cosθ, ior_ratio)
     r0 = ((1 - ior_ratio) / (1 + ior_ratio))^2
     return r0 + (1 - r0) * (1 - cosθ)^5
-end
-
-@fastmath function metal(ray, n⃗, fuzz=0)
-    @inline scattered = reflect(ray, n⃗, fuzz)
-    return scattered, scattered ⋅ n⃗ > 0 # check if scattered direction is into the object
 end
 
 @fastmath function glass(ray, n⃗, ior)
@@ -196,8 +204,8 @@ end
     end
 end
 
-@fastmath function lambertian(ray, n⃗) 
-    random = random_on_unit_sphere_surface()
+@fastmath function lambertian(n⃗) 
+    random = random_on_unit_sphere_surface() # voxel_tracer uses random_in_unit_sphere which is about 5% faster
     vector = n⃗ + random
 
     if all(vector .≈ 0)
@@ -213,8 +221,6 @@ end
 # https://discourse.julialang.org/t/help-defining-masked-vload-and-vstore-operations-for-sarrays-or-other-isbits-structs-using-llvmcall/17291
 to_tup(v::NTuple{N,VecElement{T}}) where {N,T} = ntuple(i->v[i].value, N)
 
-import LLVM.Interop: @typed_ccall
-using Core: LLVMPtr
 # ldg is for loading globals with cache
 @inline function pointerref_ldg_vectorized(base_ptr::LLVMPtr{Float32,CUDA.AS.Global}, i::Integer)
     offset = i-one(i) # in elements
@@ -222,8 +228,6 @@ using Core: LLVMPtr
     @typed_ccall("llvm.nvvm.ldg.global.f.v4f32.p1v4f32", llvmcall, NTuple{4, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Global}, Int32), ptr, Val(16))
 end
 
-using LLVM
-using LLVM.Interop
 @generated function pointerref_vectorized(ptr::LLVMPtr{Float32,CUDA.AS.Constant}, i::I) where I
     T = Float32
     VT = NTuple{4, Base.VecElement{Float32}}
@@ -266,11 +270,11 @@ using LLVM.Interop
     end
 end
 
-@inline @fastmath @inbounds function findSceneIntersection(r, hittable_list, tmin::F, tmax::F)
+@inline @fastmath @inbounds function findSceneIntersection(r, tmin::F, tmax::F)
     minHitT = tmax
     minIndex = Int32(0)
 
-    for i in Int32(1):Int32(length(hittable_list.spheres.material))
+    for i in Int32(1):Int32(length(gpu_material_type()))
         cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), i))
 
         cox = cx - r.origin.x
@@ -304,13 +308,16 @@ end
     if minHitT < tmax
         position = r(minHitT)
         cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), minIndex))
-        @inbounds material = hittable_list.spheres.material[minIndex]
+        # @inbounds material = hittable_list.spheres.material[minIndex]
+        material_data = to_tup(pointerref_vectorized(pointer(gpu_material_data()), minIndex))
+        @inbounds material_type = gpu_material_type()[minIndex]
+        material = Material(material_type, material_data)
 
         @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
 
         return hit_record(position, normal, material, minHitT)
     else 
-        return hit_record(zeros(Point), normalize(ones(Point)), Material.Lambertian(), tmax)
+        return hit_record(zeros(Point), normalize(ones(Point)), Lambertian(), tmax)
     end
 end
 
@@ -319,11 +326,11 @@ end
     return (tmp[1], tmp[2], attenuation)
 end
 
-@fastmath function ray_color(r, world, depth, tmin=F(1e-4), tmax=F(Inf))
+@inbounds @fastmath function ray_color(r, depth, tmin=F(1e-4), tmax=F(Inf))
     accumulated_attenuation = ones(Spectrum)
 
     for i in 1:depth
-        @inline record = findSceneIntersection(r, world, tmin, tmax)
+        record = findSceneIntersection(r, tmin, tmax)
 
         @smart_assert !any(isnan.(accumulated_attenuation)) accumulated_attenuation
         if record.t == tmax # nothing hit, t from initialRecord
@@ -332,10 +339,18 @@ end
         else
             @smart_assert isapprox(norm(record.normal), 1; atol=F(1e-2)) record.normal
 
-            @fastmath @inline (direction, scatterAgain, attenuation) = @match record.material begin
-                Material.Lambertian(attenuation) => (lambertian(r, record.normal), true, attenuation)
-                Material.Dielectric(attenuation, ior) => (glass(r, record.normal, ior), true, attenuation)
-                Material.Metal(attenuation, fuzz) => metalTest(r, record, attenuation, fuzz)
+            attenuation = Spectrum(@view record.material.data[1:3])
+
+            if record.material.type == 0
+                direction = lambertian(record.normal)
+                scatterAgain = true
+            elseif record.material.type == 1
+                ior = record.material.data[4]
+                direction = glass(r, record.normal, ior)
+                scatterAgain = true
+            else # not doing a check here is important about 10%, goes from 38ms to 34.5ms (i.e. on par with expronicon)
+                fuzz = record.material.data[4]
+                direction, scatterAgain =  metal(r, record.normal, fuzz)
             end
 
             if !scatterAgain
@@ -350,7 +365,7 @@ end
     return zeros(Spectrum)
 end
 
-@fastmath function renderRay(HittableList, maxDepth, pixel_position, camera)
+@fastmath function renderRay(maxDepth, pixel_position, camera)
     random_pixel_position = pixel_position + rand(F) * camera.right + rand(F) * camera.down
 
     defocus_random = camera.lens_radius * random_in_unit_disk()
@@ -358,70 +373,35 @@ end
 
     ray = Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
 
-    return ray_color(ray, HittableList, maxDepth)
+    return ray_color(ray, maxDepth)
 end
 
-@kernel function renderPixel(img, @Const(HittableList), @Const(camera), samples_per_pixel, maxDepth)
-    I = @index(Global, Cartesian)
-
-    for sample in 1:samples_per_pixel
-        @inbounds img[I] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, I), camera)
-    end
-    @inbounds img[I] /= samples_per_pixel
-end
-
-function CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+function CUDAKernel(img, camera, samples_per_pixel, maxDepth)
     i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     j = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
-
-    centre_radius = Base.Experimental.Const(HittableList.spheres.centre_radius)
-    material = Base.Experimental.Const(HittableList.spheres.material)
-
-    scene = hittable_list((centre_radius=centre_radius, material=material))
-    scene = hittable_list((material=material,))
-
-    # scene = HittableList
 
     if i > size(img)[1] || j > size(img)[2]
         return nothing
     end
 
     for sample in Int32(1):Int32(samples_per_pixel)
-        @inbounds img[i, j] += renderRay(scene, maxDepth, pixelWorldPosition(camera, i, j), camera)
+        @inbounds img[i, j] += renderRay(maxDepth, pixelWorldPosition(camera, i, j), camera)
     end
     @inbounds img[i, j] /= samples_per_pixel
     return nothing
 end
 
 function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=true)
-    if parallel == true
-        @sync for j in axes(img, 2)
-            Threads.@spawn @inbounds for i in axes(img, 1)
-                for sample in 1:samples_per_pixel
-                    @inbounds img[i, j] += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, i, j), camera)
-                end
-                @inbounds img[i, j] /= samples_per_pixel
-            end
-        end
-    elseif parallel == :GPU
+    if parallel == :GPU
         CUDA.@sync begin
             nthreads = (8, 8)
             numblocks = ceil.(Int, size(img)./nthreads)
-            @cuda threads=nthreads blocks=numblocks always_inline=true CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
+            @cuda threads=nthreads blocks=numblocks always_inline=true maxregs=35 CUDAKernel(img, camera, samples_per_pixel, maxDepth)
             # ker = @cuda launch=false always_inline=true CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
             # ker(img, scene, camera, 10, 16; threads=(8, 8), blocks=(135, 240))
             # config = launch_configuration(kernel.fun)
             # threads = min(N, config.threads)
             # blocks = cld(N, threads)
-        end
-    else
-        map!(img, CartesianIndices(img)) do index
-            pixel = zeros(Spectrum)
-            for sample in 1:samples_per_pixel
-                pixel += renderRay(HittableList, maxDepth, pixelWorldPosition(camera, index), camera)
-            end
-            pixel /= samples_per_pixel
-            return pixel
         end
     end
 
@@ -432,7 +412,7 @@ end
 
 function scene_random_spheres()
     Random.seed!(1324)
-    HittableList = [Sphere([0, 0, -1000], 1000, Material.Lambertian([.5, .5, .5]))]
+    HittableList = [Sphere([0, 0, -1000], 1000, Lambertian(Spectrum(.5, .5, .5)))]
 
 	for a in -11:10, b in -11:10
 		choose_mat = rand()
@@ -444,31 +424,31 @@ function scene_random_spheres()
 		if choose_mat < 4//5
 			# lambertian
 			albedo = rand(Spectrum) .* rand(Spectrum)
-			push!(HittableList, Sphere(center, 1//5, Material.Lambertian(albedo)))
+			push!(HittableList, Sphere(center, 1//5, Lambertian(albedo)))
 		elseif choose_mat < 95//100
 			# metal
 			albedo = rand(Spectrum) / 2 .+ 1/2
 			fuzz = rand() * 5
-			push!(HittableList, Sphere(center, 0.2, Material.Metal(albedo, fuzz)))
+			push!(HittableList, Sphere(center, 0.2, Metal(albedo, fuzz)))
 		else
 			# glass
-			push!(HittableList, Sphere(center, 0.2, Material.Dielectric()))
+			push!(HittableList, Sphere(center, 0.2, Dielectric()))
 		end
 	end
 
-	push!(HittableList, Sphere([0,0,1], 1, Material.Dielectric()))
-	push!(HittableList, Sphere([-4,0,1], 1, Material.Lambertian([0.4,0.2,0.1])))
-	push!(HittableList, Sphere([4,0,1], 1, Material.Metal([0.7,0.6,0.5], 0)))
+	push!(HittableList, Sphere([0,0,1], 1, Dielectric()))
+	push!(HittableList, Sphere([-4,0,1], 1, Lambertian(Spectrum(0.4, 0.2, 0.1))))
+	push!(HittableList, Sphere([4,0,1], 1, Metal(Spectrum(0.7, 0.6, 0.5), 0)))
 
-    tmp = StructArray(HittableList)
-
-    return hittable_list(tmp);
+    return hittable_list(HittableList);
 end
 
 ### Run Code
 spectrumToRGB(img) = map(x -> RGB(sqrt.(x)...), img |> Array)
 
 gpu_centre_radius() = 0
+gpu_material_type() = 0
+gpu_material_data() = 0
 
 function setup(parallel, resolution=1920/4, aspect_ratio=16//9)
     scene = scene_random_spheres()
@@ -476,13 +456,12 @@ function setup(parallel, resolution=1920/4, aspect_ratio=16//9)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
 
     if parallel == :GPU
-        scene = hittable_list((centre_radius=CuArray(stack(x -> [x[i] for i in 1:4], scene.spheres.centre_radius)), material=CuArray(scene.spheres.material)))
-        # scene = hittable_list(CUDA.@allowscalar replace_storage(CuArray, scene.spheres))
-        spectrum_img = CuArray(spectrum_img)
+        scene = hittable_list(StructArray(scene.spheres, unwrap=T->T==Material))
 
+        const_memory = (centre_radius=stack(scene.spheres.centre_radius), material_type=scene.spheres.material.type, material_data=stack(scene.spheres.material.data))
         if gpu_centre_radius() == 0
-            for var in [:centre_radius]
-                val = getfield(scene.spheres, var) |> Array |> vec
+            for var in [:centre_radius, :material_type, :material_data]
+                val = getfield(const_memory, var) |> Array |> vec
                 gpu_var = Symbol("gpu_$var")
                 arr_typ = :(CuDeviceArray{$(eltype(val)),$(ndims(val)),CUDA.AS.Constant})
                 @eval @inline @generated function $gpu_var()
@@ -490,10 +469,13 @@ function setup(parallel, resolution=1920/4, aspect_ratio=16//9)
                     Expr(:call, $arr_typ, ptr, $(size(val)))
                 end
             end
-
         end
+
+        scene = hittable_list((centre_radius=CuArray(stack(x -> [x[i] for i in 1:4], scene.spheres.centre_radius)), material=CuArray(scene.spheres.material)))
+        spectrum_img = CuArray(spectrum_img)
     else
         throw("Rendering not supported on CPU")
+        scene = hittable_list(StructArray(scene.spheres))
         scene = hittable_list((centre_radius=(stack(x -> [x[i] for i in 1:4], scene.spheres.centre_radius)), material=(scene.spheres.material)))
         # if gpu_centre_radius() == 0
         #     for var in [:centre_radius]
@@ -535,9 +517,7 @@ if CUDA.functional()
     function profile(parallel=:GPU)
         scene, spectrum_img, camera = setup(parallel, 1920/2)
 
-        @time_adapt NVTX.@range "Range Rendering" begin
-            CUDA.@profile render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
-        end
+        @time_adapt CUDA.@profile render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel)
 
         spectrumToRGB(spectrum_img)
     end
@@ -606,3 +586,9 @@ end
 # using Cthulhu
 # @descend ray_color(Ray(), setup() |> first, 10)
 # @device_code_warntype interactive=true test(:GPU)
+
+# try
+#     test(:GPU);
+# catch err
+#     code_warntype(err, interactive=true)
+# end
