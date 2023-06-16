@@ -64,7 +64,7 @@ end
 
 imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
 
-struct Camera{F<:Real}
+struct Camera
     u::Point
     v::Point
 
@@ -76,7 +76,8 @@ struct Camera{F<:Real}
 
     lens_radius::F
 end
-function Camera(nx=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Point(0, 0, 0), lookat=Point(0, 1, 0), up=Point(0, 0, 1), vfov=2atand(1), lens_radius=0, focus_distance=1)
+
+function Camera(nx::Integer=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Point(0, 0, 0), lookat=Point(0, 1, 0), up=Point(0, 0, 1), vfov=2atand(1), lens_radius=0, focus_distance=1)
     aspect_ratio = nx/ny
 
     camera_height = 2 * tand(vfov / 2) * focus_distance
@@ -466,4 +467,5 @@ function benchmark(;print=false, parallel=true)
 end
 
 # using Cthulhu
+# @descend test()
 # @descend ray_color(Ray(), setup() |> first, 10)
