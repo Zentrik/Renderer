@@ -414,7 +414,7 @@ function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxD
         CUDA.@sync begin
             nthreads = (8, 8)
             numblocks = ceil.(Int, size(img)./nthreads)
-            @cuda threads=nthreads blocks=numblocks always_inline=true maxregs=35 CUDAKernel(img, camera, samples_per_pixel, maxDepth)
+            @cuda threads=nthreads blocks=numblocks always_inline=true CUDAKernel(img, camera, samples_per_pixel, maxDepth)
             # ker = @cuda launch=false always_inline=true CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
             # ker(img, scene, camera, 10, 16; threads=(8, 8), blocks=(135, 240))
             # config = launch_configuration(kernel.fun)
