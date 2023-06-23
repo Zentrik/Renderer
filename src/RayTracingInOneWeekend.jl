@@ -1,9 +1,8 @@
 # This tries to stay faithful to the book's code
 # using Revise
-using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, SmartAsserts, CUDA, Random, MLStyle, LLVM
+using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, SmartAsserts, CUDA, Random, MLStyle, LLVM, Accessors
 using Core: LLVMPtr
 using LLVM.Interop
-# import LLVM.Interop: @typed_ccall
 
 if CUDA.functional()
     CUDA.allowscalar(false)
@@ -12,9 +11,8 @@ if CUDA.functional()
     # CUDA.math_mode!(CUDA.FAST_MATH; precision=:Float16)
 else
     const var"@time_adapt" = var"@time"
+    # SmartAsserts.set_enabled(false)
 end
-
-# SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
 
 const F = Float32
 
@@ -22,12 +20,21 @@ const F = Float32
 const Point = SVector{3, F} # We use F so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
 const Spectrum = SVector{3, F}
 
+function StructArrays.staticschema(::Type{Point})
+    # Define the desired names and eltypes of the "fields"
+    return NamedTuple{(:x, :y, :z), fieldtypes(Point)...}
+end
+
+StructArrays.component(m::Point, key::Symbol) = getproperty(m, key)
+StructArrays.createinstance(::Type{Point}, args...) = Point(args)
+
 @with_kw struct Ray
     origin::Point = zeros(Point)
     direction::Point = Point(0, 1, 0)
     @smart_assert isapprox(norm(direction), 1, atol=F(1e-2)) "Ray direction not normalised for Ray with origin $origin and direction $direction"
 end
 @inline (ray::Ray)(t) = ray.origin + t * ray.direction
+
 struct Material
     type::UInt32
     data::SVector{4, F} # attenuation first, then any other float
@@ -36,13 +43,6 @@ Material(type, attenuation, float) = Material(type, SVector{4, F}(attenuation...
 Lambertian(attenuation=ones(Spectrum), padding=0) = Material(0, attenuation, padding)
 Dielectric(attenuation=ones(Spectrum), ior=3//2) = Material(1, attenuation, ior)
 Metal(attenuation=ones(Spectrum), fuzz=0) = Material(2, attenuation, fuzz)
-
-struct hit_record
-    p::Point
-    normal::Point
-    material::Material
-    t::F
-end
 
 abstract type Primitive end
 
@@ -53,15 +53,11 @@ end
 function Sphere(centre, radius, material)
     Sphere(SVector{4, F}(centre..., radius), material)
 end
-
 @fastmath sphere_normal(centre, radius, position) = (position - centre) / (radius)
 
 @kwdef struct hittable_list{T}
     spheres::T = []
 end
-# Adapt.@adapt_structure hittable_list
-
-imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
 
 struct Camera
     u::Point
@@ -75,7 +71,6 @@ struct Camera
 
     lens_radius::F
 end
-
 function Camera(nx::Integer=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Point(0, 0, 0), lookat=Point(0, 1, 0), up=Point(0, 0, 1), vfov=2atand(1), lens_radius=0, focus_distance=1)
     aspect_ratio = nx/ny
 
@@ -95,18 +90,32 @@ function Camera(nx::Integer=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Poi
     return Camera(u, v, right, down, upper_left_corner, pinhole_location, lens_radius)
 end
 
+struct BufferData
+    ray::Ray
+    attenuation::Spectrum
+    pixel_index::UInt32
+    depth::UInt32
+end
+
+struct HitRecord
+    t::F
+    sphere_index::UInt32
+end
+
 ### General Functions
 
-@fastmath pixelWorldPosition(camera, index) = pixelWorldPosition(camera, index[1], index[2])
-@fastmath pixelWorldPosition(camera, x, y) = camera.upper_left_corner + (y - 1) * camera.right + (x - 1) * camera.down
+imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
+
+@fastmath pixel_world_position(camera, index) = pixel_world_position(camera, index[1], index[2])
+@fastmath pixel_world_position(camera, x, y) = camera.upper_left_corner + (y - 1) * camera.right + (x - 1) * camera.down
 
 @inline @fastmath norm2(x) = x ⋅ x
 
 @inline @fastmath normalize_fast(x) = x * (1 / sqrt(norm2(x)))
 
 if CUDA.functional()
-    @inline @fastmath CUDA.@device_override normalize_fast(x) = x * CUDA.rsqrt(norm2(x))
-    @inline @fastmath CUDA.@device_override normalize_fast(x::SVector{3}) = x * CUDA.rnorm3df(x[1], x[2], x[3])
+    CUDA.@device_override @inline @fastmath normalize_fast(x) = x * CUDA.rsqrt(norm2(x))
+    CUDA.@device_override @inline @fastmath normalize_fast(x::SVector{3}) = x * CUDA.rnorm3df(x[1], x[2], x[3])
 end
 
 function world_color(ray)
@@ -158,7 +167,7 @@ end
 @fastmath function reflect(ray, n⃗, fuzz=0)
     direction = ray.direction - 2(ray.direction ⋅ n⃗) * n⃗
 
-    # Is branching worth it?
+    # Is branching worth it? Does const prop eliminate this
     if fuzz != 0
         direction += fuzz * random_in_unit_sphere()
     end
@@ -270,11 +279,11 @@ end
     end
 end
 
-@inline @fastmath @inbounds function findSceneIntersection(r, tmin::F, tmax::F)
+@inline @fastmath @inbounds function find_scene_intersection(r, tmin::F, tmax::F)
     minHitT = tmax
-    minIndex = Int32(0)
+    minIndex = UInt32(0)
 
-    for i in Int32(1):Int32(length(gpu_material_type()))
+    for i in UInt32(1):UInt32(length(gpu_material_type()))
         cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), i))
 
         cox = cx - r.origin.x
@@ -289,9 +298,8 @@ end
         c -= radius^2
 
         quarter_discriminant = neg_half_b^2 - c
-        isDiscriminantPositive = quarter_discriminant > 0
 
-        if isDiscriminantPositive
+        if quarter_discriminant > 0
             sqrtd = sqrt(quarter_discriminant)
     
             root = neg_half_b - sqrtd
@@ -305,90 +313,60 @@ end
         end
     end
 
-    if minHitT < tmax
-        position = r(minHitT)
-        cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), minIndex))
-        # @inbounds material = hittable_list.spheres.material[minIndex]
-        material_data = to_tup(pointerref_vectorized(pointer(gpu_material_data()), minIndex))
-        @inbounds material_type = gpu_material_type()[minIndex]
+    return HitRecord(minHitT, minIndex)
+end
+
+@inbounds @fastmath function scatter!(img, next_state, ray_data, next_state_index, hit_record, max_depth, tmax)
+    r = ray_data.ray
+
+    if hit_record.t ≥ tmax # nothing hit, t from initialRecord
+        @smart_assert all(world_color(r) .>= 0)
+        new_attenuation = ray_data.attenuation .* world_color(r)
+        CUDA.atomic_add!(reinterpret(LLVMPtr{Float32, 1}, pointer(img, ray_data.pixel_index)), new_attenuation[1])
+        CUDA.atomic_add!(reinterpret(LLVMPtr{Float32, 1}, pointer(img, ray_data.pixel_index)) + UInt32(sizeof(Float32)), new_attenuation[2])
+        CUDA.atomic_add!(reinterpret(LLVMPtr{Float32, 1}, pointer(img, ray_data.pixel_index)) + UInt32(2*sizeof(Float32)), new_attenuation[3])
+    else
+        material_data = to_tup(pointerref_vectorized(pointer(gpu_material_data()), hit_record.sphere_index))
+        @inbounds material_type = gpu_material_type()[hit_record.sphere_index]
         material = Material(material_type, material_data)
 
+        position = r(hit_record.t)
+        cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), hit_record.sphere_index))
         @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
 
-        return hit_record(position, normal, material, minHitT)
-    else 
-        return hit_record(zeros(Point), normalize(ones(Point)), Lambertian(), tmax)
-    end
-end
+        @smart_assert isapprox(norm(normal), 1; atol=F(1e-2)) normal
 
-@inbounds function metalTest(r, record, attenuation, fuzz)
-    tmp = metal(r, record.normal, fuzz)
-    return (tmp[1], tmp[2], attenuation)
-end
+        attenuation = Spectrum(@view material.data[1:3])
 
-@inbounds @fastmath function ray_color(pixel_position, camera, samples_per_pixel, max_depth, tmin=F(1e-4), tmax=F(Inf))
-    samples_done = 0
-    depth = 1
-
-    sample_attenuation = ones(Spectrum)
-    total_attenuation = zeros(Spectrum)
-
-    r = generateRay(pixel_position, camera)
-
-    while samples_done < samples_per_pixel
-        record = findSceneIntersection(r, tmin, tmax)
-
-        if depth == max_depth
-            depth = 0
-            sample_attenuation = zeros(Spectrum)
+        if material.type == 0
+            direction = lambertian(normal)
+            scatter_again = true
+        elseif material.type == 1
+            ior = material.data[4]
+            direction = glass(r, normal, ior)
+            scatter_again = true
+        else # not doing a check here is important about 10%, goes from 38ms to 34.5ms (i.e. on par with expronicon)
+            fuzz = material.data[4]
+            direction, scatter_again = metal(r, normal, fuzz)
         end
 
-        @smart_assert !any(isnan.(sample_attenuation)) sample_attenuation
-        if record.t == tmax # nothing hit, t from initialRecord
-            @smart_assert all(world_color(r) .>= 0)
-            sample_attenuation = sample_attenuation .* world_color(r)
-
-            depth = 0
-        else
-            @smart_assert isapprox(norm(record.normal), 1; atol=F(1e-2)) record.normal
-
-            attenuation = Spectrum(@view record.material.data[1:3])
-
-            if record.material.type == 0
-                direction = lambertian(record.normal)
-                scatterAgain = true
-            elseif record.material.type == 1
-                ior = record.material.data[4]
-                direction = glass(r, record.normal, ior)
-                scatterAgain = true
-            else # not doing a check here is important about 10%, goes from 38ms to 34.5ms (i.e. on par with expronicon)
-                fuzz = record.material.data[4]
-                direction, scatterAgain =  metal(r, record.normal, fuzz)
-            end
-
-            if !scatterAgain
-                depth = 0
-                sample_attenuation = zeros(Spectrum)
+        if scatter_again
+            if ray_data.depth + 1 < max_depth
+                old_index = CUDA.atomic_add!(pointer(next_state_index), UInt32(1))
+                next_state[old_index] = BufferData(Ray(r.origin, direction), ray_data.attenuation .* attenuation, ray_data.pixel_index, ray_data.depth + 1)
             else
-                r = Ray(record.p, direction)
-                sample_attenuation = sample_attenuation .* attenuation
+                new_attenuation = ray_data.attenuation .* attenuation
+                CUDA.atomic_add!(reinterpret(LLVMPtr{Float32, 1}, pointer(img, ray_data.pixel_index)), new_attenuation[1])
+                CUDA.atomic_add!(reinterpret(LLVMPtr{Float32, 1}, pointer(img, ray_data.pixel_index)) + UInt32(sizeof(Float32)), new_attenuation[2])
+                CUDA.atomic_add!(reinterpret(LLVMPtr{Float32, 1}, pointer(img, ray_data.pixel_index)) + UInt32(2*sizeof(Float32)), new_attenuation[3])
             end
         end
-
-        if depth == 0
-            total_attenuation += sample_attenuation
-            sample_attenuation = ones(Spectrum)
-
-            r = generateRay(pixel_position, camera)
-            samples_done += 1
-        end
-        depth += 1
     end
 
-    return total_attenuation / samples_done
+    return nothing
 end
 
-@fastmath function generateRay(pixel_position, camera)
+@fastmath function generate_ray(pixel_position, camera)
     random_pixel_position = pixel_position + rand(F) * camera.right + rand(F) * camera.down
 
     defocus_random = camera.lens_radius * random_in_unit_disk()
@@ -397,30 +375,108 @@ end
     return Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
 end
 
-function CUDAKernel(img, camera, samples_per_pixel, maxDepth)
-    i = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
-    j = (blockIdx().y - Int32(1)) * blockDim().y + threadIdx().y
+function generate_rays_kernel!(current_state, camera, column_size, next_state_size, offset, samples_per_pixel)
+    index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    stride = gridDim().x * blockDim().x
 
-    if i > size(img)[1] || j > size(img)[2]
-        return nothing
+    for i = index:stride:next_state_size
+        img_linear_index = Int32((i + offset) ÷ samples_per_pixel)
+
+        y = ceil(Int32, img_linear_index / column_size)
+        x = mod1(img_linear_index, column_size)
+
+        ray = generate_ray(pixel_world_position(camera, x, y), camera)
+        current_state[i] = BufferData(ray, ones(Spectrum), UInt32(img_linear_index), 1)
     end
 
-    @inbounds img[i, j] = ray_color(pixelWorldPosition(camera, i, j), camera, samples_per_pixel, maxDepth)
     return nothing
 end
 
-function render!(img, HittableList, camera=Camera(); samples_per_pixel=100, maxDepth=16, parallel=true)
+function scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, tmax, next_state_index, next_state_size)
+    index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    stride = gridDim().x * blockDim().x
+
+    for i = index:stride:next_state_size
+        scatter!(img, next_state, current_state[i], next_state_index, data_for_scattering[i], max_depth, tmax)
+    end
+
+    return nothing
+end
+
+function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), samples_per_pixel=100, max_depth=16, parallel=:GPU)
     if parallel == :GPU
-        CUDA.@sync begin
-            nthreads = (8, 8)
-            numblocks = ceil.(Int, size(img)./nthreads)
-            @cuda threads=nthreads blocks=numblocks always_inline=true CUDAKernel(img, camera, samples_per_pixel, maxDepth)
-            # ker = @cuda launch=false always_inline=true CUDAKernel(img, HittableList, camera, samples_per_pixel, maxDepth)
-            # ker(img, scene, camera, 10, 16; threads=(8, 8), blocks=(135, 240))
-            # config = launch_configuration(kernel.fun)
-            # threads = min(N, config.threads)
-            # blocks = cld(N, threads)
+        number_of_rays = samples_per_pixel*length(img)
+
+        max_state_size = 10^6
+        state_size = min(samples_per_pixel*length(img), max_state_size)
+
+        current_state = replace_storage(CuArray, StructArray(Vector{BufferData}(undef, state_size)))
+        next_state = replace_storage(CuArray, StructArray(Vector{BufferData}(undef, state_size)))
+        data_for_scattering = CuArray{HitRecord}(undef, state_size)
+        next_state_index = CuArray{UInt32}([state_size+1])
+
+        number_of_rays_generated = 0
+        # img_index = 1
+
+        _scatter_kernel! = @cuda launch=false always_inline=true scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, tmax, state_index, next_state_size)
+        _scatter_kernel!_config = launch_configuration(_scatter_kernel!.fun)
+
+        _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, size(img)[1], next_state_size, number_of_rays_generated, samples_per_pixel)
+        _generate_rays_kernel!_config = launch_configuration(_generate_rays_kernel!.fun)
+
+        while number_of_rays_generated < number_of_rays
+            next_state_size = min(number_of_rays - number_of_rays_generated, state_size)
+            CUDA.@allowscalar next_state_index[] = next_state_size+1
+
+            # map!(current_state, 1:next_state_size) do i
+            #     img_linear_index = (i + number_of_rays_generated) % samples_per_pixel
+            #     x, y = divrem(img_linear_index, size(img)[1])
+            #     ray = generate_ray(pixel_world_position(camera, x, y), camera)
+            #     return BufferData(ray, ones(Spectrum), img_linear_index, 1)
+            # end
+
+            _generate_rays_kernel!_threads = min(next_state_size, _generate_rays_kernel!_config.threads)
+            _generate_rays_kernel!_blocks = cld(next_state_size, _generate_rays_kernel!_threads)
+
+            _generate_rays_kernel!(current_state, camera, size(img)[1], next_state_size, number_of_rays_generated, samples_per_pixel; threads=_generate_rays_kernel!_threads, blocks=_generate_rays_kernel!_blocks)
+            number_of_rays_generated += next_state_size
+
+            # rays_to_generate = next_state_size
+            # while rays_to_generate > 0
+            #     samples = min(rays_to_generate, samples_per_pixel)
+
+            #     CUDA.@allowscalar map!(@view(current_state[1+(img_index-1)*samples_per_pixel:(img_index-1)*samples_per_pixel+samples]), 1:samples) do _
+            #         ray = generate_ray(pixel_world_position(camera, CartesianIndices(img)[img_index]), camera)
+            #         return BufferData(ray, ones(Spectrum), img_index, 1)
+            #     end
+
+            #     # CUDA.@allowscalar current_state[img_index] = BufferData(generate_ray(pixel_world_position(camera, CartesianIndices(img)[img_index]), camera), ones(Spectrum), img_index, 1)
+
+            #     img_index += samples == samples_per_pixel ? 1 : 0
+            #     rays_to_generate -= samples
+            #     number_of_rays_generated += samples
+            # end
+
+            # for index in CartesianIndices(img)
+            #     CUDA.@allowscalar current_state[img_index] = BufferData(generate_ray(pixel_world_position(camera, index), camera), ones(Spectrum), img_index, 1)
+            #     img_index += 1
+            # end
+
+            while CUDA.@allowscalar next_state_size > 0
+                map!(ray -> find_scene_intersection(ray, tmin, tmax), data_for_scattering, @view(current_state.ray[UInt32(1):next_state_size]))
+
+                CUDA.@allowscalar next_state_index[] = 1
+                
+                _scatter_kernel!_threads = min(next_state_size, _scatter_kernel!_config.threads)
+                _scatter_kernel!_blocks = cld(next_state_size, _scatter_kernel!_threads)
+                CUDA.@sync _scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, tmax, next_state_index, next_state_size; threads=_scatter_kernel!_threads, blocks=_scatter_kernel!_blocks)
+                current_state = next_state
+                
+                next_state_size = CUDA.@allowscalar next_state_index[] - UInt32(1)
+            end
         end
+
+        img ./= samples_per_pixel
     end
 
     return nothing
