@@ -395,6 +395,16 @@ end
 
     return nothing
 end
+function scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, next_state_index, current_state_size)
+    index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    stride = gridDim().x * blockDim().x
+
+    for i = index:stride:current_state_size
+        scatter!(img, next_state, current_state[i], next_state_index, data_for_scattering[i], max_depth)
+    end
+
+    return nothing
+end
 
 @fastmath function generate_ray(pixel_position, camera)
     random_pixel_position = pixel_position + rand(F) * camera.right + rand(F) * camera.down
@@ -404,7 +414,6 @@ end
 
     return Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
 end
-
 function generate_rays_kernel!(current_state, camera, column_size, next_state_size, offset, samples_per_pixel)
     index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
@@ -417,23 +426,6 @@ function generate_rays_kernel!(current_state, camera, column_size, next_state_si
 
         ray = generate_ray(pixel_world_position(camera, x, y), camera)
         current_state[i] = BufferData(ray, ones(Spectrum), UInt32(img_linear_index), 1)
-    end
-
-    return nothing
-end
-
-function scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, next_state_index, current_state_size)
-    index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
-    stride = gridDim().x * blockDim().x
-
-    # hack for Nsight compute, should work? I assume index = 1 is first index, shouldn't be out of order.
-    # Essential now, use this to skip next_state_index .= 1
-    if index == 1
-        next_state_index[] = 1
-    end
-
-    for i = index:stride:current_state_size
-        scatter!(img, next_state, current_state[i], next_state_index, data_for_scattering[i], max_depth)
     end
 
     return nothing
@@ -466,25 +458,17 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
         end
         next_state_index = CuArray{UInt32}([1])
 
-        _scatter_kernel! = @cuda launch=false always_inline=true scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, next_state_index, current_state_size)
-        _scatter_kernel!_config = launch_configuration(_scatter_kernel!.fun)
-
+        _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, size(img)[1], current_state_size, number_of_rays_generated, samples_per_pixel)
+        _generate_rays_kernel!_config = launch_configuration(_generate_rays_kernel!.fun)
+        
         _intersect_kernel! = @cuda launch=false always_inline=true intersect_kernel!(data_for_scattering, current_state.ray, state_size, tmin, tmax)
         _intersect_kernel!_config = launch_configuration(_intersect_kernel!.fun)
 
-        _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, size(img)[1], current_state_size, number_of_rays_generated, samples_per_pixel)
-        _generate_rays_kernel!_config = launch_configuration(_generate_rays_kernel!.fun)
+        _scatter_kernel! = @cuda launch=false always_inline=true scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, next_state_index, current_state_size)
+        _scatter_kernel!_config = launch_configuration(_scatter_kernel!.fun)
 
         while number_of_rays_generated < number_of_rays
             current_state_size = min(number_of_rays - number_of_rays_generated, state_size)
-            # CUDA.@allowscalar next_state_index[] = next_state_size+1
-
-            # map!(current_state, 1:next_state_size) do i
-            #     img_linear_index = (i + number_of_rays_generated) % samples_per_pixel
-            #     x, y = divrem(img_linear_index, size(img)[1])
-            #     ray = generate_ray(pixel_world_position(camera, x, y), camera)
-            #     return BufferData(ray, ones(Spectrum), img_linear_index, 1)
-            # end
 
             _generate_rays_kernel!_threads = min(current_state_size, _generate_rays_kernel!_config.threads)
             _generate_rays_kernel!_blocks = cld(current_state_size, _generate_rays_kernel!_threads)
@@ -492,31 +476,9 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
             _generate_rays_kernel!(current_state, camera, size(img)[1], current_state_size, number_of_rays_generated, samples_per_pixel; threads=_generate_rays_kernel!_threads, blocks=_generate_rays_kernel!_blocks)
             number_of_rays_generated += current_state_size
 
-            # rays_to_generate = next_state_size
-            # while rays_to_generate > 0
-            #     samples = min(rays_to_generate, samples_per_pixel)
-
-            #     CUDA.@allowscalar map!(@view(current_state[1+(img_index-1)*samples_per_pixel:(img_index-1)*samples_per_pixel+samples]), 1:samples) do _
-            #         ray = generate_ray(pixel_world_position(camera, CartesianIndices(img)[img_index]), camera)
-            #         return BufferData(ray, ones(Spectrum), img_index, 1)
-            #     end
-
-            #     # CUDA.@allowscalar current_state[img_index] = BufferData(generate_ray(pixel_world_position(camera, CartesianIndices(img)[img_index]), camera), ones(Spectrum), img_index, 1)
-
-            #     img_index += samples == samples_per_pixel ? 1 : 0
-            #     rays_to_generate -= samples
-            #     number_of_rays_generated += samples
-            # end
-
-            # for index in CartesianIndices(img)
-            #     CUDA.@allowscalar current_state[img_index] = BufferData(generate_ray(pixel_world_position(camera, index), camera), ones(Spectrum), img_index, 1)
-            #     img_index += 1
-            # end
-
             while current_state_size > 0
-                # next_state_index .= 1
+                next_state_index .= 1
 
-                # map!(ray -> find_scene_intersection(ray, tmin, tmax), data_for_scattering, @view(current_state.ray[UInt32(1):next_state_size]))
                 _intersect_kernel!_threads = min(current_state_size, _intersect_kernel!_config.threads)
                 _intersect_kernel!_blocks = cld(current_state_size, _intersect_kernel!_threads)
                 CUDA.@sync _intersect_kernel!(data_for_scattering, current_state.ray, current_state_size, tmin, tmax; threads=_intersect_kernel!_threads, blocks=_intersect_kernel!_blocks)
@@ -524,7 +486,10 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
                 _scatter_kernel!_threads = min(current_state_size, _scatter_kernel!_config.threads)
                 _scatter_kernel!_blocks = cld(current_state_size, _scatter_kernel!_threads)
                 CUDA.@sync _scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, next_state_index, current_state_size; threads=_scatter_kernel!_threads, blocks=_scatter_kernel!_blocks)
-                current_state .= next_state
+                
+                tmp = current_state;
+                current_state = next_state;
+                next_state = tmp;
                 
                 current_state_size = CUDA.@allowscalar next_state_index[] - UInt32(1)
             end
