@@ -1,5 +1,4 @@
 GammaTesting.jl
-*.png
 *.exr
 *.pb.gz
 
@@ -10,3 +9,6 @@ in_one_weekend/target
 *.llvm
 *.ptx
 *.sass
+
+*.png
+!coalesced_memory*.png
