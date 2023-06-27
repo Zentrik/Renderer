@@ -250,19 +250,6 @@ to_tup(v::NTuple{N,VecElement{T}}) where {N,T} = ntuple(i->v[i].value, N)
     ptr = base_ptr + offset*sizeof(Float32)
     @typed_ccall("llvm.nvvm.ldg.global.f.v4f32.p1v4f32", llvmcall, NTuple{4, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Global}, Int32), ptr, Val(16))
 end
-@inline function pointerref_ldg_vectorized(base_ptr::LLVMPtr{Ray,CUDA.AS.Global}, i::Integer)
-    offset = i-one(i) # in elements
-    ptr = reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, base_ptr) + offset*sizeof(Ray)
-    ox, oy = to_tup(@typed_ccall("llvm.nvvm.ldg.global.f.v2f32.p1v2f32", llvmcall, NTuple{2, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Global}, Int32), ptr, Val(8)))
-
-    ptr += 2*sizeof(Float32)
-    oz, dx = to_tup(@typed_ccall("llvm.nvvm.ldg.global.f.v2f32.p1v2f32", llvmcall, NTuple{2, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Global}, Int32), ptr, Val(8)))
-
-    ptr += 2*sizeof(Float32)
-    dy, dz = to_tup(@typed_ccall("llvm.nvvm.ldg.global.f.v2f32.p1v2f32", llvmcall, NTuple{2, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Global}, Int32), ptr, Val(8)))
-
-    return Ray(Point(ox, oy, oz), Point(dx, dy, dz))
-end
 @inline function pointerref_ldg_vectorized(ptr::LLVMPtr{HitRecord, CUDA.AS.Global})
     reinterpreted_ptr = reinterpret(LLVMPtr{Float32,CUDA.AS.Global}, ptr)
     t, sphere_index = to_tup(@typed_ccall("llvm.nvvm.ldg.global.f.v2f32.p1v2f32", llvmcall, NTuple{2, Base.VecElement{Float32}}, (LLVMPtr{Float32,CUDA.AS.Global}, Int32), reinterpreted_ptr, Val(16)))
@@ -403,7 +390,8 @@ function intersect_kernel!(data_for_scattering, rays, rays_size, tmin, tmax)
 
     i = index
     while i <= rays_size
-        ray = pointerref_ldg_vectorized(pointer(rays), i)
+        # ray = pointerref_ldg_vectorized(pointer(rays), i)
+        ray = rays[i]
 
         # ray = rays[i]
         data_for_scattering[i] = find_scene_intersection(ray, tmin, tmax)
@@ -463,10 +451,10 @@ end
             elseif scatter_again
                 old_index = CUDA.atomic_add!(pointer(next_state_index), UInt32(1))
                 # next_state[old_index] = BufferData(Ray(position, direction), new_attenuation, pixel_index, current_state.depth[i] + 1)
-                # next_state.ray[old_index] = Ray(position, direction)
-                pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index)), (position[1], position[2]), 1, Val(8))
-                pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index) + 2*sizeof(Float32)), (position[3], direction[1]), 1, Val(8))
-                pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index) + 4*sizeof(Float32)), (direction[2], direction[3]), 1, Val(8))
+                next_state.ray[old_index] = Ray(position, direction)
+                # pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index)), (position[1], position[2]), 1, Val(8))
+                # pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index) + 2*sizeof(Float32)), (position[3], direction[1]), 1, Val(8))
+                # pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index) + 4*sizeof(Float32)), (direction[2], direction[3]), 1, Val(8))
                 # next_state.attenuation_and_pixel_index[old_index] = (new_attenuation, pixel_index)
                 pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.attenuation_and_pixel_index)), (new_attenuation..., reinterpret(Float32, pixel_index)), old_index, Val(16))
                 next_state.depth[old_index] = current_state.depth + 1
@@ -490,7 +478,8 @@ end
 
         # img[ray_data.pixel_index] += new_attenuation
     else
-        r = pointerref_ldg_vectorized(pointer(current_state.ray), i)
+        # r = pointerref_ldg_vectorized(pointer(current_state.ray), i)
+        r = current_state.ray[i]
 
         position = r(hit_record.t)
         cx, cy, cz, radius = to_tup(pointerref_vectorized(pointer(gpu_centre_radius()), hit_record.sphere_index))
@@ -527,10 +516,10 @@ end
             elseif scatter_again
                 old_index = CUDA.atomic_add!(pointer(next_state_index), UInt32(1))
                 # next_state[old_index] = BufferData(Ray(position, direction), new_attenuation, pixel_index, current_state.depth[i] + 1)
-                # next_state.ray[old_index] = Ray(position, direction)
-                pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index)), (position[1], position[2]), 1, Val(8))
-                pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index) + 2*sizeof(Float32)), (position[3], direction[1]), 1, Val(8))
-                pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index) + 4*sizeof(Float32)), (direction[2], direction[3]), 1, Val(8))
+                next_state.ray[old_index] = Ray(position, direction)
+                # pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index)), (position[1], position[2]), 1, Val(8))
+                # pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index) + 2*sizeof(Float32)), (position[3], direction[1]), 1, Val(8))
+                # pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index) + 4*sizeof(Float32)), (direction[2], direction[3]), 1, Val(8))
                 # next_state.attenuation_and_pixel_index[old_index] = (new_attenuation, pixel_index)
                 pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.attenuation_and_pixel_index)), (new_attenuation..., reinterpret(Float32, pixel_index)), old_index, Val(16))
                 next_state.depth[old_index] = current_state.depth[i] + 1
@@ -545,9 +534,9 @@ end
     stride = gridDim().x * blockDim().x
 
     # Only for Nsight compute prevents out of bound error
-    # if index == 1
-    #     next_state_index[] = 1
-    # end
+    if index == 1
+        next_state_index[] = 1
+    end
 
     # for i = index:stride:current_state_size
         # scatter!(img, next_state, current_state[i], next_state_index, data_for_scattering[i], max_depth)
@@ -568,13 +557,14 @@ end
     stride = gridDim().x * blockDim().x
 
     # Only for Nsight compute prevents out of bound error
-    # if index == 1
-    #     next_state_index[] = 1
-    # end
+    if index == 1
+        next_state_index[] = 1
+    end
 
     i = index
     while i <= rays_size
-        ray = pointerref_ldg_vectorized(pointer(current_state.ray), i)
+        # ray = pointerref_ldg_vectorized(pointer(current_state.ray), i)
+        ray = current_state.ray[i]
 
         hit_record = find_scene_intersection(ray, tmin, tmax)
         scatter!(img, next_state, current_state, i, next_state_index, hit_record, max_depth)
@@ -613,9 +603,9 @@ end
     stride = gridDim().x * blockDim().x
 
     # Only for Nsight compute prevents out of bound error
-    # if index == 1
-    #     next_state_index[] = 1
-    # end
+    if index == 1
+        next_state_index[] = 1
+    end
 
     i = index
     while i <= rays_size
@@ -652,8 +642,8 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
         max_state_size = 10^7
         state_size = min(number_of_rays, max_state_size)
 
-        current_state = StructArrays.buildfromschema(typ -> undef_array(typ, (state_size,)), BufferData);
-        next_state = StructArrays.buildfromschema(typ -> undef_array(typ, (state_size,)), BufferData);
+        current_state = StructArrays.buildfromschema(typ -> undef_array(typ, (state_size,); unwrap=T->(T==Ray||T==Point)), BufferData);
+        next_state = StructArrays.buildfromschema(typ -> undef_array(typ, (state_size,); unwrap=T->(T==Ray||T==Point)), BufferData);
         data_for_scattering = CuArray{HitRecord}(undef, state_size)
 
         number_of_rays_generated = 0
