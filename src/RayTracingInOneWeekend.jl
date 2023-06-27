@@ -588,12 +588,12 @@ end
 function voxel_tracer(parallel=true, print=false)
     scene, spectrum_img, camera = setup(parallel, 1200, 12//8)
 
-    # @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=50, parallel=parallel)
-    @match parallel begin
-        :GPU => display(@benchmark (CUDA.@sync render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50)))
-        :false => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50))
-        _ => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50) teardown=sleep(1) seconds=20)
-    end
+    @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel, maxDepth=50)
+    # @match parallel begin
+    #     :GPU => display(@benchmark (CUDA.@sync render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50)))
+    #     :false => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50))
+    #     _ => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, maxDepth=50) teardown=sleep(1) seconds=20)
+    # end
     if print
         rgb_img = spectrumToRGB(spectrum_img)
         rgb_img |> display
