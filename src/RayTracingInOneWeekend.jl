@@ -236,10 +236,10 @@ end
 
     sizeof(T) == 0 && return T.instance
     @dispose ctx=Context() begin
-        eltyp = convert(LLVMType, VT; ctx)
+        eltyp = convert(LLVMType, VT)
 
-        T_idx = convert(LLVMType, I; ctx)
-        T_ptr = convert(LLVMType, ptr; ctx)
+        T_idx = convert(LLVMType, I)
+        T_ptr = convert(LLVMType, ptr)
 
         T_typed_ptr = LLVM.PointerType(eltyp, A)
 
@@ -248,8 +248,8 @@ end
         llvm_f, _ = create_function(eltyp, param_types)
 
         # generate IR
-        @dispose builder=IRBuilder(ctx) begin
-            entry = BasicBlock(llvm_f, "entry"; ctx)
+        @dispose builder=IRBuilder() begin
+            entry = BasicBlock(llvm_f, "entry")
             position!(builder, entry)
             ptr = if supports_typed_pointers(ctx)
                 typed_ptr = bitcast!(builder, parameters(llvm_f)[1], T_typed_ptr)
@@ -259,7 +259,7 @@ end
             end
             ld = load!(builder, eltyp, ptr)
             if A != 0
-                metadata(ld)[LLVM.MD_tbaa] = tbaa_addrspace(A; ctx)
+                metadata(ld)[LLVM.MD_tbaa] = tbaa_addrspace(A)
             end
             alignment!(ld, align)
 

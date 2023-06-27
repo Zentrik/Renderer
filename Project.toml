@@ -16,6 +16,9 @@ SmartAsserts = "56560af0-ab70-43fe-a531-155d81972b00"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 
+[compat]
+LLVM="6"
+
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
