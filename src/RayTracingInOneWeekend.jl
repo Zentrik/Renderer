@@ -728,12 +728,8 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
 
     # https://github.com/JuliaCI/BenchmarkTools.jl/issues/127
     CUDA.unsafe_free!(data_for_scattering)
-    CUDA.unsafe_free!(current_state.ray)
-    CUDA.unsafe_free!(current_state.pixel_index)
-    CUDA.unsafe_free!(current_state.depth)
-    CUDA.unsafe_free!(next_state.ray)
-    CUDA.unsafe_free!(next_state.pixel_index)
-    CUDA.unsafe_free!(next_state.depth)
+    StructArrays.foreachfield(CUDA.unsafe_free!, current_state)
+    StructArrays.foreachfield(CUDA.unsafe_free!, next_state)
 
     return nothing
 end
