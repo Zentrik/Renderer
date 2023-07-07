@@ -592,18 +592,23 @@ end
 
     return Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
 end
-function generate_rays_kernel!(current_state, camera, column_size, next_state_size, offset, samples_per_pixel)
+function generate_rays_kernel!(current_state, camera, column_size, current_state_size, offset, samples_per_pixel, index_offset=0)
     index = (blockIdx().x - UInt32(1)) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
 
-    for i = index:stride:next_state_size
+    for i = index:stride:current_state_size
         img_linear_index = 1 + UInt32((i - 1 + offset) ÷ samples_per_pixel)
 
         y = ceil(Int32, img_linear_index / column_size)
         x = mod1(img_linear_index, column_size)
 
         ray = generate_ray(pixel_world_position(camera, x, y), camera)
-        current_state[i] = BufferData(ray, ones(Spectrum), UInt32(img_linear_index), 1)
+        # current_state[i + index_offset] = BufferData(ray, ones(Spectrum), UInt32(img_linear_index), 1)
+        pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(current_state.ray, i + index_offset)), (ray.origin[1], ray.origin[2]), 1, Val(8))
+        pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(current_state.ray, i + index_offset) + 2*sizeof(Float32)), (ray.origin[3], ray.direction[1]), 1, Val(8))
+        pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(current_state.ray, i + index_offset) + 4*sizeof(Float32)), (ray.direction[2], ray.direction[3]), 1, Val(8))
+        pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(current_state.attenuation_and_pixel_index)), (ones(Spectrum)..., reinterpret(Float32, UInt32(img_linear_index))), i + index_offset, Val(16))
+        current_state.depth[i + index_offset] = 1
     end
 
     return nothing
@@ -664,7 +669,7 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
         end
         next_state_index = CuArray{UInt32}([1])
 
-        _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, size(img)[1], current_state_size, number_of_rays_generated, samples_per_pixel)
+        _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, size(img)[1], current_state_size, number_of_rays_generated, samples_per_pixel, 0)
         _generate_rays_kernel!_config = launch_configuration(_generate_rays_kernel!.fun)
         
         _intersect_kernel! = @cuda launch=false always_inline=true intersect_kernel!(data_for_scattering, current_state.ray, state_size, tmin, tmax)
@@ -679,46 +684,53 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
         _generate_and_intersect_and_scatter_kernel! = @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, max_depth, next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, samples_per_pixel, size(img)[1])
         _generate_and_intersect_and_scatter_kernel!_config = launch_configuration(_generate_and_intersect_and_scatter_kernel!.fun)
 
-        @time_adapt while number_of_rays_generated < number_of_rays
-            current_state_size = UInt32(min(number_of_rays - number_of_rays_generated, state_size))
+        current_state_size = UInt32(min(number_of_rays - number_of_rays_generated, state_size))
 
-            # _generate_rays_kernel!_threads = min(current_state_size, _generate_rays_kernel!_config.threads)
-            # _generate_rays_kernel!_blocks = cld(current_state_size, _generate_rays_kernel!_threads)
-            # _generate_rays_kernel!(current_state, camera, size(img)[1], current_state_size, number_of_rays_generated, samples_per_pixel; threads=_generate_rays_kernel!_threads, blocks=_generate_rays_kernel!_blocks)
+        # _generate_rays_kernel!_threads = min(current_state_size, _generate_rays_kernel!_config.threads)
+        # _generate_rays_kernel!_blocks = cld(current_state_size, _generate_rays_kernel!_threads)
+        # _generate_rays_kernel!(current_state, camera, size(img)[1], current_state_size, number_of_rays_generated, samples_per_pixel; threads=_generate_rays_kernel!_threads, blocks=_generate_rays_kernel!_blocks)
 
-            _generate_and_intersect_and_scatter_kernel!_threads = min(current_state_size, _generate_and_intersect_and_scatter_kernel!_config.threads)
-            _generate_and_intersect_and_scatter_kernel!_blocks = cld(current_state_size, _generate_and_intersect_and_scatter_kernel!_threads)
-            _generate_and_intersect_and_scatter_kernel!(img, current_state, max_depth, next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, samples_per_pixel, size(img)[1]; threads=_generate_and_intersect_and_scatter_kernel!_threads, blocks=_generate_and_intersect_and_scatter_kernel!_blocks)
+        _generate_and_intersect_and_scatter_kernel!_threads = min(current_state_size, _generate_and_intersect_and_scatter_kernel!_config.threads)
+        _generate_and_intersect_and_scatter_kernel!_blocks = cld(current_state_size, _generate_and_intersect_and_scatter_kernel!_threads)
+        _generate_and_intersect_and_scatter_kernel!(img, current_state, max_depth, next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, samples_per_pixel, size(img)[1]; threads=_generate_and_intersect_and_scatter_kernel!_threads, blocks=_generate_and_intersect_and_scatter_kernel!_blocks)
 
-            number_of_rays_generated += current_state_size
+        number_of_rays_generated += current_state_size
+        
+        rays_traced += current_state_size
+        current_state_size = CUDA.@allowscalar next_state_index[] - UInt32(1)
+        CUDA.@allowscalar next_state_index[] = UInt32(1)
+
+        while current_state_size > 0
+            free_slots = UInt32(min(number_of_rays - number_of_rays_generated, state_size - current_state_size))
+            if free_slots > 0
+                _generate_rays_kernel!_threads = min(free_slots, _generate_rays_kernel!_config.threads)
+                _generate_rays_kernel!_blocks = cld(free_slots, _generate_rays_kernel!_threads)
+                _generate_rays_kernel!(current_state, camera, size(img)[1], free_slots, number_of_rays_generated, samples_per_pixel, current_state_size; threads=_generate_rays_kernel!_threads, blocks=_generate_rays_kernel!_blocks)
+
+                number_of_rays_generated += free_slots
+                current_state_size += free_slots
+            end
+
+            # _intersect_and_scatter_kernel!_threads = 256
+            _intersect_and_scatter_kernel!_threads = min(current_state_size, _intersect_and_scatter_kernel!_config.threads)
+            _intersect_and_scatter_kernel!_blocks = cld(current_state_size, _intersect_and_scatter_kernel!_threads)
+            CUDA.@sync _intersect_and_scatter_kernel!(img, next_state, current_state, max_depth, next_state_index, current_state_size, tmin, tmax; threads=_intersect_and_scatter_kernel!_threads, blocks=_intersect_and_scatter_kernel!_blocks)
+
+            # _intersect_kernel!_threads = min(current_state_size, _intersect_kernel!_config.threads)
+            # _intersect_kernel!_blocks = cld(current_state_size, _intersect_kernel!_threads)
+            # CUDA.@sync _intersect_kernel!(data_for_scattering, current_state.ray, current_state_size, tmin, tmax; threads=_intersect_kernel!_threads, blocks=_intersect_kernel!_blocks)
+            
+            # _scatter_kernel!_threads = min(current_state_size, _scatter_kernel!_config.threads)
+            # _scatter_kernel!_blocks = cld(current_state_size, _scatter_kernel!_threads)
+            # CUDA.@sync _scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, next_state_index, current_state_size; threads=_scatter_kernel!_threads, blocks=_scatter_kernel!_blocks)
+            
+            tmp = current_state;
+            current_state = next_state;
+            next_state = tmp;
             
             rays_traced += current_state_size
             current_state_size = CUDA.@allowscalar next_state_index[] - UInt32(1)
             CUDA.@allowscalar next_state_index[] = UInt32(1)
-
-            while current_state_size > 0
-                rays_traced += current_state_size
-
-                # _intersect_and_scatter_kernel!_threads = 256
-                _intersect_and_scatter_kernel!_threads = min(current_state_size, _intersect_and_scatter_kernel!_config.threads)
-                _intersect_and_scatter_kernel!_blocks = cld(current_state_size, _intersect_and_scatter_kernel!_threads)
-                CUDA.@sync _intersect_and_scatter_kernel!(img, next_state, current_state, max_depth, next_state_index, current_state_size, tmin, tmax; threads=_intersect_and_scatter_kernel!_threads, blocks=_intersect_and_scatter_kernel!_blocks)
-
-                # _intersect_kernel!_threads = min(current_state_size, _intersect_kernel!_config.threads)
-                # _intersect_kernel!_blocks = cld(current_state_size, _intersect_kernel!_threads)
-                # CUDA.@sync _intersect_kernel!(data_for_scattering, current_state.ray, current_state_size, tmin, tmax; threads=_intersect_kernel!_threads, blocks=_intersect_kernel!_blocks)
-                
-                # _scatter_kernel!_threads = min(current_state_size, _scatter_kernel!_config.threads)
-                # _scatter_kernel!_blocks = cld(current_state_size, _scatter_kernel!_threads)
-                # CUDA.@sync _scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, next_state_index, current_state_size; threads=_scatter_kernel!_threads, blocks=_scatter_kernel!_blocks)
-                
-                tmp = current_state;
-                current_state = next_state;
-                next_state = tmp;
-                
-                current_state_size = CUDA.@allowscalar next_state_index[] - UInt32(1)
-                CUDA.@allowscalar next_state_index[] = UInt32(1)
-            end
         end
 
         img ./= samples_per_pixel
