@@ -461,7 +461,7 @@ end
 
                 # img[ray_data.pixel_index] += new_attenuation
             elseif scatter_again
-                old_index = CUDA.atomic_add!(pointer(next_state_index), UInt32(1))
+                old_index = CUDA.atomic_add!(pointer(next_state_index), Int32(1))
                 # next_state[old_index] = BufferData(Ray(position, direction), new_attenuation, pixel_index, current_state.depth[i] + 1)
                 # next_state.ray[old_index] = Ray(position, direction)
                 pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index)), (position[1], position[2]), 1, Val(8))
@@ -525,7 +525,7 @@ end
 
                 # img[ray_data.pixel_index] += new_attenuation
             elseif scatter_again
-                old_index = CUDA.atomic_add!(pointer(next_state_index), UInt32(1))
+                old_index = CUDA.atomic_add!(pointer(next_state_index), Int32(1))
                 # next_state[old_index] = BufferData(Ray(position, direction), new_attenuation, pixel_index, current_state.depth[i] + 1)
                 # next_state.ray[old_index] = Ray(position, direction)
                 pointerset_vectorized(reinterpret(LLVMPtr{Float32, CUDA.AS.Global}, pointer(next_state.ray, old_index)), (position[1], position[2]), 1, Val(8))
@@ -592,14 +592,14 @@ end
 
     return Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
 end
-function generate_rays_kernel!(current_state, camera, column_size, current_state_size, offset, samples_per_pixel, index_offset=0)
-    index = (blockIdx().x - UInt32(1)) * blockDim().x + threadIdx().x
+function generate_rays_kernel!(current_state, camera, column_size, current_state_size, offset, samples_per_pixel, index_offset=Int32(0))
+    index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
 
     for i = index:stride:current_state_size
-        img_linear_index = 1 + UInt32((i - 1 + offset) ÷ samples_per_pixel)
+        img_linear_index = UInt32(1) + UInt32((i - UInt32(1) + offset) ÷ samples_per_pixel)
 
-        y = ceil(Int32, img_linear_index / column_size)
+        y = ceil(UInt32, img_linear_index / column_size)
         x = mod1(img_linear_index, column_size)
 
         ray = generate_ray(pixel_world_position(camera, x, y), camera)
@@ -614,7 +614,7 @@ function generate_rays_kernel!(current_state, camera, column_size, current_state
     return nothing
 end
 @inbounds function generate_and_intersect_and_scatter_kernel!(img, next_state, max_depth, next_state_index, rays_size, tmin, tmax, camera, offset, samples_per_pixel, column_size)
-    index = (blockIdx().x - UInt32(1)) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
 
     # Only for Nsight compute prevents out of bound error
@@ -624,7 +624,7 @@ end
 
     i = index
     while i <= rays_size
-        img_linear_index = 1 + UInt32((i - 1 + offset) ÷ samples_per_pixel)
+        img_linear_index = UInt32(1) + UInt32((i - UInt32(1) + offset) ÷ samples_per_pixel)
 
         y = ceil(Int32, img_linear_index / column_size)
         x = mod1(img_linear_index, column_size)
@@ -661,15 +661,18 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
         next_state = StructArrays.buildfromschema(typ -> undef_array(typ, (state_size,)), BufferData);
         data_for_scattering = CuArray{HitRecord}(undef, state_size)
 
-        number_of_rays_generated = 0
+        number_of_rays_generated::UInt32 = 0
 
-        current_state_size = UInt32(min(number_of_rays - number_of_rays_generated, state_size))
+        current_state_size = Int32(min(number_of_rays - number_of_rays_generated, state_size))
         if current_state_size + 1 > typemax(UInt32)
             throw("Overflow")
         end
-        next_state_index = CuArray{UInt32}([1])
+        if number_of_rays > typemax(UInt32)
+            throw("Overflow 2")
+        end
+        next_state_index = CuArray{Int32}([1])
 
-        _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, size(img)[1], current_state_size, number_of_rays_generated, samples_per_pixel, 0)
+        _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, UInt32(size(img)[1]), current_state_size, number_of_rays_generated, UInt32(samples_per_pixel))
         _generate_rays_kernel!_config = launch_configuration(_generate_rays_kernel!.fun)
         
         _intersect_kernel! = @cuda launch=false always_inline=true intersect_kernel!(data_for_scattering, current_state.ray, state_size, tmin, tmax)
@@ -697,15 +700,15 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
         number_of_rays_generated += current_state_size
         
         rays_traced += current_state_size
-        current_state_size = CUDA.@allowscalar next_state_index[] - UInt32(1)
-        CUDA.@allowscalar next_state_index[] = UInt32(1)
+        current_state_size = CUDA.@allowscalar next_state_index[] - Int32(1)
+        CUDA.@allowscalar next_state_index[] = Int32(1)
 
         while current_state_size > 0
             free_slots = UInt32(min(number_of_rays - number_of_rays_generated, state_size - current_state_size))
             if free_slots > 0
                 _generate_rays_kernel!_threads = min(free_slots, _generate_rays_kernel!_config.threads)
                 _generate_rays_kernel!_blocks = cld(free_slots, _generate_rays_kernel!_threads)
-                _generate_rays_kernel!(current_state, camera, size(img)[1], free_slots, number_of_rays_generated, samples_per_pixel, current_state_size; threads=_generate_rays_kernel!_threads, blocks=_generate_rays_kernel!_blocks)
+                _generate_rays_kernel!(current_state, camera, UInt32(size(img)[1]), free_slots, number_of_rays_generated, UInt32(samples_per_pixel), current_state_size; threads=_generate_rays_kernel!_threads, blocks=_generate_rays_kernel!_blocks)
 
                 number_of_rays_generated += free_slots
                 current_state_size += free_slots
@@ -729,8 +732,8 @@ function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), 
             next_state = tmp;
             
             rays_traced += current_state_size
-            current_state_size = CUDA.@allowscalar next_state_index[] - UInt32(1)
-            CUDA.@allowscalar next_state_index[] = UInt32(1)
+            current_state_size = CUDA.@allowscalar next_state_index[] - Int32(1)
+            CUDA.@allowscalar next_state_index[] = Int32(1)
         end
 
         img ./= samples_per_pixel
