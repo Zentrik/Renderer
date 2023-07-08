@@ -4,11 +4,9 @@ authors = ["zentrik <Zentrik@users.noreply.github.com>"]
 version = "0.2.0"
 
 [deps]
-Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
-LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MLStyle = "d8e11817-5142-5d16-987a-aa16d5891078"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
@@ -16,9 +14,6 @@ Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 SmartAsserts = "56560af0-ab70-43fe-a531-155d81972b00"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
-
-[compat]
-LLVM = "6"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
