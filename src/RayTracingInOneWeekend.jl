@@ -337,7 +337,9 @@ function intersect_kernel!(data_for_scattering, rays, rays_size, tmin, tmax)
     while i <= rays_size
         ray = unsafe_cached_load_vectorized(pointer(rays), i)
 
-        @inbounds data_for_scattering[i] = find_scene_intersection(ray, tmin, tmax)
+        hit_record = find_scene_intersection(ray, tmin, tmax)
+        unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(data_for_scattering)), (hit_record.t, reinterpret(Float32, hit_record.sphere_index)), i, Val(8))
+        # @inbounds data_for_scattering[i] = find_scene_intersection(ray, tmin, tmax)
 
         i += stride
     end
@@ -517,7 +519,7 @@ end
         x = mod1(img_linear_index, column_size)
 
         rng = RNG(img_linear_index * (i + offset))
-        ray = generate_ray!(rng, pixel_world_position(camera, x, y), camera)
+        ray = generate_ray!(rng, pixel_world_position(camera, F(x), F(y)), camera)
         # current_state[i + index_offset] = BufferData(ray, ones(Spectrum), UInt32(img_linear_index), 1)
         unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(current_state.ray, i + index_offset)), (ray.origin[1], ray.origin[2]), 1, Val(8))
         unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(current_state.ray, i + index_offset) + 2*sizeof(Float32)), (ray.origin[3], ray.direction[1]), 1, Val(8))
@@ -552,7 +554,7 @@ end
         # x = ifelse(x == 0, column_size, -x)
 
         rng = RNG(img_linear_index * (i + offset))
-        ray = generate_ray!(rng, pixel_world_position(camera, x, y), camera)
+        ray = generate_ray!(rng, pixel_world_position(camera, F(x), F(y)), camera)
         current_state = BufferData(ray, ones(Spectrum), img_linear_index, 1)
 
         hit_record = find_scene_intersection(ray, tmin, tmax)
