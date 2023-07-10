@@ -596,24 +596,24 @@ nearest_pow_of_2(x) = Int64(exp2(round(Int64, log2(x))))
 
         _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, UInt32(size(img)[1]), current_state_size, number_of_rays_generated, UInt32(samples_per_pixel), Int32(0))
         _generate_rays_kernel!_config = launch_configuration(_generate_rays_kernel!.fun)
-        @show CUDA.registers(_generate_rays_kernel!)
-        @show CUDA.memory(_generate_rays_kernel!)
+        # @show CUDA.registers(_generate_rays_kernel!)
+        # @show CUDA.memory(_generate_rays_kernel!)
 
         _intersect_kernel! = @cuda launch=false always_inline=true intersect_kernel!(data_for_scattering, current_state.ray, state_size, tmin, tmax)
         _intersect_kernel!_config = launch_configuration(_intersect_kernel!.fun)
-        @show CUDA.registers(_intersect_kernel!)
-        @show CUDA.memory(_intersect_kernel!)
+        # @show CUDA.registers(_intersect_kernel!)
+        # @show CUDA.memory(_intersect_kernel!)
 
         _scatter_kernel! = @cuda launch=false always_inline=true scatter_kernel!(img, next_state, current_state, data_for_scattering, UInt32(max_depth), next_state_index, current_state_size, number_of_rays_generated)
         _scatter_kernel!_config = launch_configuration(_scatter_kernel!.fun)
-        @show CUDA.registers(_scatter_kernel!)
-        @show CUDA.memory(_scatter_kernel!)
+        # @show CUDA.registers(_scatter_kernel!)
+        # @show CUDA.memory(_scatter_kernel!)
 
         _intersect_and_scatter_kernel! = @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated)
         _intersect_and_scatter_kernel!_config = launch_configuration(_intersect_and_scatter_kernel!.fun)
-        @show CUDA.registers(_intersect_and_scatter_kernel!)
-        @show CUDA.memory(_intersect_and_scatter_kernel!)
-        @show _intersect_and_scatter_kernel!_config
+        # @show CUDA.registers(_intersect_and_scatter_kernel!)
+        # @show CUDA.memory(_intersect_and_scatter_kernel!)
+        # @show _intersect_and_scatter_kernel!_config
 
         # @device_code_warntype interactive=true @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated)
 
@@ -623,15 +623,15 @@ nearest_pow_of_2(x) = Int64(exp2(round(Int64, log2(x))))
 
        _generate_and_intersect_and_scatter_kernel! = @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
         _generate_and_intersect_and_scatter_kernel!_config = launch_configuration(_generate_and_intersect_and_scatter_kernel!.fun)
-        @show CUDA.registers(_generate_and_intersect_and_scatter_kernel!)
-        @show CUDA.memory(_generate_and_intersect_and_scatter_kernel!)
-        @show _generate_and_intersect_and_scatter_kernel!_config
+        # @show CUDA.registers(_generate_and_intersect_and_scatter_kernel!)
+        # @show CUDA.memory(_generate_and_intersect_and_scatter_kernel!)
+        # @show _generate_and_intersect_and_scatter_kernel!_config
 
         # @device_code_warntype interactive=true @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
 
-        buf = IOBuffer();
-        @device_code_llvm io=buf @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
-        write("_generate_and_intersect_and_scatter_kernel!.llvm", take!(buf))
+        # buf = IOBuffer();
+        # @device_code_llvm io=buf @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
+        # write("_generate_and_intersect_and_scatter_kernel!.llvm", take!(buf))
 
         current_state_size = UInt32(min(number_of_rays - number_of_rays_generated, state_size))
 
@@ -643,7 +643,7 @@ nearest_pow_of_2(x) = Int64(exp2(round(Int64, log2(x))))
         _generate_and_intersect_and_scatter_kernel!_blocks = cld(current_state_size, _generate_and_intersect_and_scatter_kernel!_threads)
         # _generate_and_intersect_and_scatter_kernel!_blocks = 60
         # min(_generate_and_intersect_and_scatter_kernel!_config.blocks, cld(current_state_size, _generate_and_intersect_and_scatter_kernel!_threads))
-        @show Int(_generate_and_intersect_and_scatter_kernel!_blocks)
+        # @show Int(_generate_and_intersect_and_scatter_kernel!_blocks)
         _generate_and_intersect_and_scatter_kernel!(img, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]); threads=_generate_and_intersect_and_scatter_kernel!_threads, blocks=_generate_and_intersect_and_scatter_kernel!_blocks)
 
         number_of_rays_generated += current_state_size
@@ -690,7 +690,7 @@ nearest_pow_of_2(x) = Int64(exp2(round(Int64, log2(x))))
         img ./= samples_per_pixel
     end
 
-    println(rays_traced)
+    # println(rays_traced)
 
     # https://github.com/JuliaCI/BenchmarkTools.jl/issues/127
     CUDA.unsafe_free!(data_for_scattering)
