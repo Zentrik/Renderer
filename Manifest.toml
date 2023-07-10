@@ -2,7 +2,7 @@
 
 julia_version = "1.9.2"
 manifest_format = "2.0"
-project_hash = "4cb1678fad862d2a155b636e594c565d3acb0c89"
+project_hash = "1044b1f8a8ded1263ceb5f33aa82923a7d82a4b4"
 
 [[deps.AbstractFFTs]]
 deps = ["LinearAlgebra"]
@@ -497,6 +497,11 @@ deps = ["Artifacts", "JLLWrappers", "LazyArtifacts", "Libdl", "TOML"]
 git-tree-sha1 = "c35203c1e1002747da220ffc3c0762ce7754b08c"
 uuid = "dad2f222-ce93-54a1-a47d-0025e8a3acab"
 version = "0.0.23+0"
+
+[[deps.LLVMLoopInfo]]
+git-tree-sha1 = "2e5c102cfc41f48ae4740c7eca7743cc7e7b75ea"
+uuid = "8b046642-f1f6-4319-8d3c-209ddc03c586"
+version = "1.0.0"
 
 [[deps.LazyArtifacts]]
 deps = ["Artifacts", "Pkg"]

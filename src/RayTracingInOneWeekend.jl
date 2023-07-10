@@ -1,6 +1,6 @@
 # This tries to stay faithful to the book's code
 # using Revise
-using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, SmartAsserts, CUDA, Random, MLStyle
+using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, SmartAsserts, CUDA, Random, MLStyle, LLVMLoopInfo
 using Core: LLVMPtr
 using LLVM, LLVM.Interop
 
@@ -296,7 +296,7 @@ end
     minIndex = UInt32(0)
 
     assume(length(gpu_material_type()) >= 1)
-    for i in UInt32(1):UInt32(length(gpu_material_type()))
+    @loopinfo unrollcount=16 predicate for i in UInt32(1):UInt32(length(gpu_material_type()))
         cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), i, Val(16)))
 
         cox = cx - r.origin.x
@@ -857,19 +857,24 @@ function benchmark(;print=false, parallel=true)
     if print
         rgb_img = spectrumToRGB(spectrum_img)
         rgb_img |> display
-    end
+    end 
     return nothing
 end
 
 function voxel_tracer(parallel=true, print=false)
     scene, spectrum_img, camera = setup(parallel, 1200, 12//8)
 
-    @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel, max_depth=50)
-    # @match parallel begin
-    #     :GPU => display(@benchmark (CUDA.@sync render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, max_depth=50)))
-    #     :false => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, max_depth=50))
-    #     _ => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, max_depth=50) teardown=sleep(1) seconds=20)
-    # end
+    # @time_adapt render!(spectrum_img, scene, camera, samples_per_pixel=10, parallel=parallel, max_depth=50)
+    @match parallel begin
+        :GPU => begin
+            display(@benchmark (CUDA.@sync render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, max_depth=50)))
+
+            # https://github.com/JuliaCI/BenchmarkTools.jl/issues/127
+            CUDA.reclaim()
+        end
+        :false => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, max_depth=50))
+        _ => display(@benchmark render!($spectrum_img, $scene, $camera, samples_per_pixel=$10, parallel=$parallel, max_depth=50) teardown=sleep(1) seconds=20)
+    end
     if print
         rgb_img = spectrumToRGB(spectrum_img)
         rgb_img |> display
