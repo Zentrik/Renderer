@@ -295,6 +295,20 @@ end
     return Spectrum(s1, s2, s3), reinterpret(UInt32, pixel_index)
 end
 
+@inline function unsafe_store_vectorized!(ptr::LLVMPtr{Ray,CUDA.AS.Global}, ray)
+    unsafe_store!(LLVMPtr{Vec{2, F}}(ptr), (ray.origin[1], ray.origin[2]), 1, Val(8))
+    unsafe_store!(LLVMPtr{Vec{2, F}}(ptr + 2*sizeof(Float32)), (ray.origin[3], ray.direction[1]), 1, Val(8))
+    unsafe_store!(LLVMPtr{Vec{2, F}}(ptr + 4*sizeof(Float32)), (ray.direction[2], ray.direction[3]), 1, Val(8))
+
+    return nothing
+end
+
+@inline function unsafe_store_vectorized!(ptr::LLVMPtr{Tuple{Spectrum, UInt32},CUDA.AS.Global}, attenuation_and_pixel_index)
+    unsafe_store!(LLVMPtr{Vec{4, F}}(ptr), (attenuation_and_pixel_index[1]..., reinterpret(Float32, UInt32(attenuation_and_pixel_index[end]))), 1, Val(16))
+
+    return nothing
+end
+
 ### Render Loop
 
 @inline @fastmath function find_scene_intersection(r, tmin::F, tmax::F)
@@ -345,7 +359,6 @@ function intersect_kernel!(data_for_scattering, rays, rays_size, tmin, tmax)
 
         hit_record = find_scene_intersection(ray, tmin, tmax)
         unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(data_for_scattering)), (hit_record.t, reinterpret(Float32, hit_record.sphere_index)), i, Val(8))
-        # @inbounds data_for_scattering[i] = find_scene_intersection(ray, tmin, tmax)
 
         i += stride
     end
@@ -392,10 +405,9 @@ end
             elseif scatter_again
                 old_index = CUDA.atomic_add!(pointer(next_state_index), Int32(1))
 
-                unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(next_state.ray, old_index)), (position[1], position[2]), 1, Val(8))
-                unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(next_state.ray, old_index) + 2*sizeof(Float32)), (position[3], direction[1]), 1, Val(8))
-                unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(next_state.ray, old_index) + 4*sizeof(Float32)), (direction[2], direction[3]), 1, Val(8))
-                unsafe_store!(LLVMPtr{Vec{4, F}}(pointer(next_state.attenuation_and_pixel_index)), (new_attenuation..., reinterpret(Float32, pixel_index)), old_index, Val(16))
+                unsafe_store_vectorized!(pointer(next_state.ray, old_index), Ray(position, direction))
+                # Don't actually need to rewrite pixel_index though it enables vectorization
+                unsafe_store_vectorized!(pointer(next_state.attenuation_and_pixel_index, old_index), (new_attenuation, pixel_index))
                 @inbounds next_state.depth[old_index] = current_state.depth + 1
             end
         # end
@@ -446,10 +458,9 @@ end
             elseif scatter_again
                 old_index = CUDA.atomic_add!(pointer(next_state_index), Int32(1))
 
-                unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(next_state.ray, old_index)), (position[1], position[2]), 1, Val(8))
-                unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(next_state.ray, old_index) + 2*sizeof(Float32)), (position[3], direction[1]), 1, Val(8))
-                unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(next_state.ray, old_index) + 4*sizeof(Float32)), (direction[2], direction[3]), 1, Val(8))
-                unsafe_store!(LLVMPtr{Vec{4, F}}(pointer(next_state.attenuation_and_pixel_index)), (new_attenuation..., reinterpret(Float32, pixel_index)), old_index, Val(16))
+                unsafe_store_vectorized!(pointer(next_state.ray, old_index), Ray(position, direction))
+                # Don't actually need to rewrite pixel_index though it enables vectorization
+                unsafe_store_vectorized!(pointer(next_state.attenuation_and_pixel_index, old_index), (new_attenuation, pixel_index))
                 @inbounds next_state.depth[old_index] = current_state.depth[i] + UInt32(1)
             end
         # end
@@ -526,11 +537,9 @@ end
 
         rng = RNG(img_linear_index * (i + offset))
         ray = generate_ray!(rng, pixel_world_position(camera, F(x), F(y)), camera)
-        # current_state[i + index_offset] = BufferData(ray, ones(Spectrum), UInt32(img_linear_index), 1)
-        unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(current_state.ray, i + index_offset)), (ray.origin[1], ray.origin[2]), 1, Val(8))
-        unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(current_state.ray, i + index_offset) + 2*sizeof(Float32)), (ray.origin[3], ray.direction[1]), 1, Val(8))
-        unsafe_store!(LLVMPtr{Vec{2, F}}(pointer(current_state.ray, i + index_offset) + 4*sizeof(Float32)), (ray.direction[2], ray.direction[3]), 1, Val(8))
-        unsafe_store!(LLVMPtr{Vec{4, F}}(pointer(current_state.attenuation_and_pixel_index)), (ones(Spectrum)..., reinterpret(Float32, UInt32(img_linear_index))), i + index_offset, Val(16))
+
+        unsafe_store_vectorized!(pointer(current_state.ray, i + index_offset), ray)
+        unsafe_store_vectorized!(pointer(current_state.attenuation_and_pixel_index, i + index_offset), (ones(Spectrum), img_linear_index))
         @inbounds current_state.depth[i + index_offset] = UInt32(1)
 
         i += stride
