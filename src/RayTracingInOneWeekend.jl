@@ -670,15 +670,15 @@ nearest_pow_of_2(x) = Int64(exp2(round(Int64, log2(x))))
             _intersect_and_scatter_kernel!_blocks = cld(current_state_size, _intersect_and_scatter_kernel!_threads)
             # _intersect_and_scatter_kernel!_blocks = min(_intersect_and_scatter_kernel!_config.blocks, cld(current_state_size, _intersect_and_scatter_kernel!_threads))
             # _intersect_and_scatter_kernel!_blocks = min(60, cld(current_state_size, _intersect_and_scatter_kernel!_threads))
-            CUDA.@sync _intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated; threads=_intersect_and_scatter_kernel!_threads, blocks=_intersect_and_scatter_kernel!_blocks)
+            _intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated; threads=_intersect_and_scatter_kernel!_threads, blocks=_intersect_and_scatter_kernel!_blocks)
 
             # _intersect_kernel!_threads = min(current_state_size, _intersect_kernel!_config.threads)
             # _intersect_kernel!_blocks = cld(current_state_size, _intersect_kernel!_threads)
-            # CUDA.@sync _intersect_kernel!(data_for_scattering, current_state.ray, current_state_size, tmin, tmax; threads=_intersect_kernel!_threads, blocks=_intersect_kernel!_blocks)
+            # _intersect_kernel!(data_for_scattering, current_state.ray, current_state_size, tmin, tmax; threads=_intersect_kernel!_threads, blocks=_intersect_kernel!_blocks)
             
             # _scatter_kernel!_threads = min(current_state_size, _scatter_kernel!_config.threads)
             # _scatter_kernel!_blocks = cld(current_state_size, _scatter_kernel!_threads)
-            # CUDA.@sync _scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, next_state_index, current_state_size, number_of_rays_generated; threads=_scatter_kernel!_threads, blocks=_scatter_kernel!_blocks)
+            # _scatter_kernel!(img, next_state, current_state, data_for_scattering, max_depth, next_state_index, current_state_size, number_of_rays_generated; threads=_scatter_kernel!_threads, blocks=_scatter_kernel!_blocks)
             
             tmp = current_state;
             current_state = next_state;
