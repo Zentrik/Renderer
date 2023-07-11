@@ -124,16 +124,22 @@ end
     return (word >> UInt32(22)) ⊻ word
 end
 
-function rand!(rng::RNG, ::Type{Float32}) # random float in [0, 1)
+function rand!(rng::RNG, ::Type{UInt32})
     rng.seed = pcg_hash(rng.seed)
-    # return Float32(rng.seed) / Float32(typemax(UInt32))
-    return reinterpret(Float32, rng.seed & 0x007FFFFF | 0x3f800000) - 1f0
+end
+
+function rand!(rng::RNG, ::Type{Float32}) # random float in [0, 1)
+    # return rand(Float32)
+    # return Float32(rand!(rng, UInt32)) / Float32(typemax(UInt32))
+    return reinterpret(Float32, rand!(rng, UInt32) & 0x007FFFFF | 0x3f800000) - 1f0
+    # https://github.com/JuliaLang/julia/issues/44887
+    # return Float32(rand!(rng, UInt32) >>> 8) * Float32(0x1.0p-24) 
 end
 
 function rand_minustoplus!(rng::RNG, ::Type{Float32}) # random float in [-1, 1)
-    rng.seed = pcg_hash(rng.seed)
-    # return Float32(rng.seed) / Float32(typemax(UInt32)) * 2 - 1
-    return reinterpret(Float32, rng.seed & 0x007FFFFF | 0x40000000) - 3f0
+    # return rand!(rng, Float32) * 2 - 1
+    # return Float32(rand!(rng, UInt32)) / Float32(typemax(UInt32)) * 2 - 1
+    return reinterpret(Float32, rand!(rng, UInt32) & 0x007FFFFF | 0x40000000) - 3f0
 end
 
 ### General Functions
