@@ -1,0 +1,85 @@
+CUDA.registers(_generate_rays_kernel!) = 30
+CUDA.memory(_generate_rays_kernel!) = (local = 8, shared = 0, constant = 0)
+CUDA.registers(_intersect_kernel!) = 21
+CUDA.memory(_intersect_kernel!) = (local = 8, shared = 0, constant = 7744)
+CUDA.registers(_scatter_kernel!) = 45
+CUDA.memory(_scatter_kernel!) = (local = 8, shared = 0, constant = 17424)
+CUDA.registers(_intersect_and_scatter_kernel!) = 43
+CUDA.memory(_intersect_and_scatter_kernel!) = (local = 8, shared = 0, constant = 25168)
+_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 640)
+CUDA.registers(_generate_and_intersect_and_scatter_kernel!) = 33
+CUDA.memory(_generate_and_intersect_and_scatter_kernel!) = (local = 8, shared = 0, constant = 25168)
+_generate_and_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 768)   
+Int(_generate_and_intersect_and_scatter_kernel!_blocks) = 135
+276803
+  3.060689 seconds (2.13 M CPU allocations: 128.122 MiB, 1.65% gc time) (8 GPU allocations: 9.492 MiB, 0.00% memmgmt time)
+
+  CUDA.registers(_generate_rays_kernel!) = 29
+CUDA.memory(_generate_rays_kernel!) = (local = 0, shared = 0, constant = 0)
+CUDA.registers(_intersect_kernel!) = 19
+CUDA.memory(_intersect_kernel!) = (local = 0, shared = 0, constant = 7744)
+CUDA.registers(_scatter_kernel!) = 40
+CUDA.memory(_scatter_kernel!) = (local = 0, shared = 0, constant = 17424)
+CUDA.registers(_intersect_and_scatter_kernel!) = 40
+CUDA.memory(_intersect_and_scatter_kernel!) = (local = 0, shared = 0, constant = 25168)       
+_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 768)
+CUDA.registers(_generate_and_intersect_and_scatter_kernel!) = 36
+CUDA.memory(_generate_and_intersect_and_scatter_kernel!) = (local = 8, shared = 0, constant = 
+25168)
+_generate_and_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 768)
+Int(_generate_and_intersect_and_scatter_kernel!_blocks) = 135
+276817
+  3.106654 seconds (2.24 M CPU allocations: 133.667 MiB, 2.33% gc time) (8 GPU allocations: 9.492 MiB, 0.00% memmgmt time)
+
+  CUDA.registers(_generate_rays_kernel!) = 29
+CUDA.memory(_generate_rays_kernel!) = (local = 0, shared = 0, constant = 0)
+CUDA.registers(_intersect_kernel!) = 19
+CUDA.memory(_intersect_kernel!) = (local = 0, shared = 0, constant = 7744)
+CUDA.registers(_scatter_kernel!) = 40
+CUDA.memory(_scatter_kernel!) = (local = 0, shared = 0, constant = 17424)
+CUDA.registers(_intersect_and_scatter_kernel!) = 40
+CUDA.memory(_intersect_and_scatter_kernel!) = (local = 0, shared = 0, constant = 25168)
+_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 768)
+CUDA.registers(_generate_and_intersect_and_scatter_kernel!) = 36
+CUDA.memory(_generate_and_intersect_and_scatter_kernel!) = (local = 0, shared = 0, constant = 25168)
+_generate_and_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 768)   
+Int(_generate_and_intersect_and_scatter_kernel!_blocks) = 135
+277523
+  3.776272 seconds (2.38 M CPU allocations: 138.760 MiB, 1.56% gc time) (8 GPU allocations: 9.492 MiB, 0.00% memmgmt time)
+
+
+# Forced Int32 GPUCompiler/CUDA branch
+CUDA.registers(_generate_rays_kernel!) = 22
+CUDA.memory(_generate_rays_kernel!) = (local = 0, shared = 
+0, constant = 0)
+CUDA.registers(_intersect_kernel!) = 19
+CUDA.memory(_intersect_kernel!) = (local = 0, shared = 0, constant = 7744)
+CUDA.registers(_scatter_kernel!) = 44
+CUDA.memory(_scatter_kernel!) = (local = 0, shared = 0, constant = 17424)
+CUDA.registers(_intersect_and_scatter_kernel!) = 35        
+CUDA.memory(_intersect_and_scatter_kernel!) = (local = 0, shared = 0, constant = 25168)
+_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 768)
+CUDA.registers(_generate_and_intersect_and_scatter_kernel!) = 30
+CUDA.memory(_generate_and_intersect_and_scatter_kernel!) = 
+(local = 0, shared = 0, constant = 25168)
+_generate_and_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 1024)
+Int(_generate_and_intersect_and_scatter_kernel!_blocks) = 102
+277171
+  1.173068 seconds (341.83 k CPU allocations: 16.872 MiB, 1.76% gc time) (8 GPU allocations: 9.492 MiB, 0.00% memmgmt 
+time)
+
+6f713b84833c34cbe800191976b99a786988928a commit (Clean up, remove ...)
+CUDA.registers(_generate_rays_kernel!) = 22
+CUDA.memory(_generate_rays_kernel!) = (local = 0, shared = 0, constant = 0)
+CUDA.registers(_intersect_kernel!) = 20
+CUDA.memory(_intersect_kernel!) = (local = 0, shared = 0, constant = 7744)
+CUDA.registers(_scatter_kernel!) = 37
+CUDA.memory(_scatter_kernel!) = (local = 0, shared = 0, constant = 17424)
+CUDA.registers(_intersect_and_scatter_kernel!) = 37
+CUDA.memory(_intersect_and_scatter_kernel!) = (local = 0, shared = 0, 
+constant = 25168)
+_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 768)
+CUDA.registers(_generate_and_intersect_and_scatter_kernel!) = 32
+CUDA.memory(_generate_and_intersect_and_scatter_kernel!) = (local = 0, shared = 0, constant = 25168)
+_generate_and_intersect_and_scatter_kernel!_config = (blocks = 30, threads = 1024)
+  2.709983 seconds (2.06 M CPU allocations: 127.471 MiB, 2.50% gc time) (8 GPU allocations: 474.609 MiB, 0.00% memmgmt time)

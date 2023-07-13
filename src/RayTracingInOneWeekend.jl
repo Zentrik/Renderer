@@ -1,15 +1,25 @@
 # This tries to stay faithful to the book's code
 # using Revise
-using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, SmartAsserts, CUDA, Random, MLStyle, LLVMLoopInfo
+using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, CUDA, Random, MLStyle, LLVMLoopInfo
 using Core: LLVMPtr
 using LLVM, LLVM.Interop
+import SmartAsserts: @smart_assert
 
 if CUDA.functional()
     CUDA.allowscalar(false)
     const var"@time_adapt" = CUDA.var"@time"
-    SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
+    # SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
     # CUDA.math_mode!(CUDA.PEDANTIC_MATH)
     # CUDA.math_mode!(CUDA.FAST_MATH; precision=:Float16)
+
+    macro smart_assert(ex, msg=nothing)
+        return :($(esc(ex)) ? $(nothing) : @cuprintln(("Assertion failed at line $($(__source__.line))")) )
+        # return :( $ex ? nothing : @cuprintln(("Assertion failed at line $($(__source__.line)): " * $(string(ex)))) )
+    end
+
+    # macro smart_assert(ex, msg=nothing)
+    #     return :($(esc(ex)))
+    # end
 else
     const var"@time_adapt" = var"@time"
 end
@@ -34,7 +44,7 @@ StructArrays.createinstance(::Type{SVector{3, F}}, args...) = SVector{3, F}(args
 @with_kw struct Ray
     origin::Point = zeros(Point)
     direction::Point = Point(0, 1, 0)
-    @smart_assert isapprox(norm(direction), 1, atol=F(1e-2)) "Ray direction not normalised for Ray with origin $origin and direction $direction"
+    @smart_assert isapprox(direction ⋅ direction, 1, atol=F(1e-2)) "Ray direction not normalised for Ray with origin $origin and direction $direction"
 end
 @inline (ray::Ray)(t) = ray.origin + t * ray.direction
 
@@ -390,8 +400,8 @@ end
 
 
     if hit_record.sphere_index == 0 # nothing hit
-        # r = Ray(zeros(Point), Point(0, 0, z))
-        r = Ray(zeros(Point), Point(0, 0, @inbounds current_state.ray[i].direction.z))
+        # r = Ray(zeros(Point), Point(0, 0, @inbounds current_state.ray[i].direction.z))
+        r = (point=zeros(Point), direction=Point(0, 0, @inbounds current_state.ray[i].direction.z)) # avoids checking direction is normalised
         @smart_assert all(world_color(r) .>= 0)
         atomic_add!(img, pixel_index, r_attenuation .* world_color(r))
     else
@@ -558,14 +568,18 @@ end
 
         _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, UInt32(size(img)[1]), current_state_size, number_of_rays_generated, UInt32(samples_per_pixel), Int32(0))
         _generate_rays_kernel!_config = launch_configuration(_generate_rays_kernel!.fun)
-        @show CUDA.registers(_generate_rays_kernel!)
-        @show CUDA.memory(_generate_rays_kernel!)
+        # @show CUDA.registers(_generate_rays_kernel!)
+        # @show CUDA.memory(_generate_rays_kernel!)
+
+        # buf = IOBuffer();
+        # @device_code_llvm io=buf @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, UInt32(size(img)[1]), current_state_size, number_of_rays_generated, UInt32(samples_per_pixel), Int32(0))
+        # write("_generate_rays_kernel!.llvm", take!(buf))
 
         _intersect_and_scatter_kernel! = @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated)
         _intersect_and_scatter_kernel!_config = launch_configuration(_intersect_and_scatter_kernel!.fun)
-        @show CUDA.registers(_intersect_and_scatter_kernel!)
-        @show CUDA.memory(_intersect_and_scatter_kernel!)
-        @show _intersect_and_scatter_kernel!_config
+        # @show CUDA.registers(_intersect_and_scatter_kernel!)
+        # @show CUDA.memory(_intersect_and_scatter_kernel!)
+        # @show _intersect_and_scatter_kernel!_config
 
         # @device_code_warntype interactive=true @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated)
 
@@ -575,15 +589,19 @@ end
 
        _generate_and_intersect_and_scatter_kernel! = @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
         _generate_and_intersect_and_scatter_kernel!_config = launch_configuration(_generate_and_intersect_and_scatter_kernel!.fun)
-        @show CUDA.registers(_generate_and_intersect_and_scatter_kernel!)
-        @show CUDA.memory(_generate_and_intersect_and_scatter_kernel!)
-        @show _generate_and_intersect_and_scatter_kernel!_config
+        # @show CUDA.registers(_generate_and_intersect_and_scatter_kernel!)
+        # @show CUDA.memory(_generate_and_intersect_and_scatter_kernel!)
+        # @show _generate_and_intersect_and_scatter_kernel!_config
 
         # @device_code_warntype interactive=true @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
 
         # buf = IOBuffer();
         # @device_code_llvm io=buf @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
         # write("_generate_and_intersect_and_scatter_kernel!.llvm", take!(buf))
+
+        # buf = IOBuffer();
+        # @device_code_ptx io=buf @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
+        # write("_generate_and_intersect_and_scatter_kernel!.ptx", take!(buf))
 
         current_state_size = UInt32(min(number_of_rays - number_of_rays_generated, state_size))
 
