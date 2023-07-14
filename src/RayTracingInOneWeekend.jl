@@ -5,6 +5,11 @@ using Core: LLVMPtr
 using LLVM, LLVM.Interop
 import SmartAsserts: @smart_assert
 
+struct Literal{T} end
+Base.:(*)(x, ::Type{Literal{T}}) where {T} = T(x)
+const i32 = Literal{Int32}
+const u32 = Literal{UInt32}
+
 if CUDA.functional()
     CUDA.allowscalar(false)
     const var"@time_adapt" = CUDA.var"@time"
@@ -128,10 +133,10 @@ mutable struct RNG <: AbstractRNG
     seed::UInt32
 end
 @inline @fastmath function pcg_hash(seed::UInt32)
-    state = seed * UInt32(747796405) + UInt32(2891336453)
+    state = seed * 747796405u32 + 2891336453u32
     # https://github.com/JuliaLang/julia/issues/50225
-    word = ((state >> (((state >> UInt32(28)) + UInt32(4)) & (8*sizeof(UInt32)-1))) ⊻ state) * UInt32(277803737)
-    return (word >> UInt32(22)) ⊻ word
+    word = ((state >> (((state >> 28u32) + 4u32) & (8*sizeof(UInt32)-1))) ⊻ state) * 277803737u32
+    return (word >> 22u32) ⊻ word
 end
 
 function rand!(rng::RNG, ::Type{UInt32})
@@ -383,12 +388,12 @@ end
             if current_state.depth == max_depth
                 atomic_add!(img, pixel_index, new_attenuation)
             elseif scatter_again
-                old_index = CUDA.atomic_add!(pointer(next_state_index), Int32(1))
+                old_index = CUDA.atomic_add!(pointer(next_state_index), 1i32)
 
                 unsafe_store_vectorized!(pointer(next_state.ray, old_index), Ray(position, direction))
                 # Don't actually need to rewrite pixel_index though it enables vectorization
                 unsafe_store_vectorized!(pointer(next_state.attenuation_and_pixel_index, old_index), (new_attenuation, pixel_index))
-                @inbounds next_state.depth[old_index] = current_state.depth + 1
+                @inbounds next_state.depth[old_index] = current_state.depth + 1u32
             end
         # end
     end
@@ -436,12 +441,12 @@ end
             @inbounds if current_state.depth[i] == max_depth
                 atomic_add!(img, pixel_index, r_attenuation .* world_color(r))
             elseif scatter_again
-                old_index = CUDA.atomic_add!(pointer(next_state_index), Int32(1))
+                old_index = CUDA.atomic_add!(pointer(next_state_index), 1i32)
 
                 unsafe_store_vectorized!(pointer(next_state.ray, old_index), Ray(position, direction))
                 # Don't actually need to rewrite pixel_index though it enables vectorization
                 unsafe_store_vectorized!(pointer(next_state.attenuation_and_pixel_index, old_index), (new_attenuation, pixel_index))
-                @inbounds next_state.depth[old_index] = current_state.depth[i] + UInt32(1)
+                @inbounds next_state.depth[old_index] = current_state.depth[i] + 1u32
             end
         # end
     end
@@ -464,7 +469,7 @@ end
     while i <= current_state_size
         assume(samples_per_pixel > 0)
         assume(i > 0)
-        img_linear_index = UInt32(1) + UInt32((i - UInt32(1) + offset) ÷ samples_per_pixel)
+        img_linear_index = 1u32 + UInt32((i - 1u32 + offset) ÷ samples_per_pixel)
 
         assume(column_size > 0)
         y = cld(img_linear_index, column_size)
@@ -475,7 +480,7 @@ end
 
         unsafe_store_vectorized!(pointer(current_state.ray, i + index_offset), ray)
         unsafe_store_vectorized!(pointer(current_state.attenuation_and_pixel_index, i + index_offset), (ones(Spectrum), img_linear_index))
-        @inbounds current_state.depth[i + index_offset] = UInt32(1)
+        @inbounds current_state.depth[i + index_offset] = 1u32
 
         i += stride
     end
@@ -483,7 +488,7 @@ end
     return nothing
 end
 function intersect_and_scatter_kernel!(img, next_state, current_state, max_depth, next_state_index, rays_size, tmin, tmax, number_of_rays_generated)
-    index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
 
     # Only for Nsight compute prevents out of bound error
@@ -506,7 +511,7 @@ function intersect_and_scatter_kernel!(img, next_state, current_state, max_depth
     return nothing
 end
 @fastmath function generate_and_intersect_and_scatter_kernel!(img, next_state, max_depth, next_state_index, rays_size, tmin, tmax, camera, offset, samples_per_pixel, column_size)
-    index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
+    index = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
 
     # Only for Nsight compute prevents out of bound error
@@ -518,7 +523,7 @@ end
     while i <= rays_size
         assume(samples_per_pixel > 0)
         assume(i > 0)
-        img_linear_index = UInt32(1) + UInt32((i - UInt32(1) + offset) ÷ samples_per_pixel)
+        img_linear_index = 1u32 + UInt32((i - 1u32 + offset) ÷ samples_per_pixel)
 
         assume(column_size > 0)
         y = cld(img_linear_index, column_size)
@@ -645,8 +650,8 @@ end
             next_state = tmp;
             
             rays_traced += current_state_size
-            current_state_size = CUDA.@allowscalar next_state_index[] - Int32(1)
-            CUDA.@allowscalar next_state_index[] = Int32(1)
+            current_state_size = CUDA.@allowscalar next_state_index[] - 1i32
+            CUDA.@allowscalar next_state_index[] = 1i32
         end
 
         img ./= samples_per_pixel
