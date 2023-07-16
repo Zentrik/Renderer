@@ -12,3 +12,5 @@ in_one_weekend/target
 
 *.png
 !coalesced_memory*.png
+
+!intersect_and_scatter_kernel!_*.*
