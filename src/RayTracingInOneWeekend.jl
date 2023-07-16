@@ -1,9 +1,8 @@
 # This tries to stay faithful to the book's code
 # using Revise
-using Parameters, StaticArrays, LinearAlgebra, Images, StructArrays, CUDA, Random, MLStyle, LLVMLoopInfo
+using StaticArrays, LinearAlgebra, Images, StructArrays, CUDA, Random, MLStyle, LLVMLoopInfo, SmartAsserts
 using Core: LLVMPtr
 using LLVM, LLVM.Interop
-import SmartAsserts: @smart_assert
 
 struct Literal{T} end
 Base.:(*)(x, ::Type{Literal{T}}) where {T} = T(x)
@@ -13,20 +12,21 @@ const u32 = Literal{UInt32}
 if CUDA.functional()
     CUDA.allowscalar(false)
     const var"@time_adapt" = CUDA.var"@time"
-    # SmartAsserts.set_enabled(false) # crashes gpu compiler if enabled
     # CUDA.math_mode!(CUDA.PEDANTIC_MATH)
     # CUDA.math_mode!(CUDA.FAST_MATH; precision=:Float16)
 
-    macro smart_assert(ex, msg=nothing)
+    macro assert_adapt(ex, msg=nothing)
         return :($(esc(ex)) ? $(nothing) : @cuprintln(("Assertion failed at line $($(__source__.line))")) )
         # return :( $ex ? nothing : @cuprintln(("Assertion failed at line $($(__source__.line)): " * $(string(ex)))) )
     end
 
-    # macro smart_assert(ex, msg=nothing)
+    # macro assert_adapt(ex, msg=nothing)
     #     return :($(esc(ex)))
     # end
 else
+    # SmartAsserts.set_enabled(false)
     const var"@time_adapt" = var"@time"
+    const var"@assert_adapt" = var"@smart_assert"
 end
 
 const F = Float32
@@ -46,10 +46,14 @@ StructArrays.staticschema(::Type{SVector{3, F}}) = NamedTuple{(:x, :y, :z), fiel
 StructArrays.component(m::SVector{3, F}, key::Symbol) = getproperty(m, key)
 StructArrays.createinstance(::Type{SVector{3, F}}, args...) = SVector{3, F}(args)
 
-@with_kw struct Ray
-    origin::Point = zeros(Point)
-    direction::Point = Point(0, 1, 0)
-    @smart_assert isapprox(direction ⋅ direction, 1, atol=F(1e-2)) "Ray direction not normalised for Ray with origin $origin and direction $direction"
+struct Ray
+    origin::Point
+    direction::Point
+    
+    function Ray(origin=zeros(Point), direction=Point(0, 1, 0))
+        @assert_adapt isapprox(direction ⋅ direction, 1, atol=F(1e-2)) "Ray direction not normalised for Ray with origin $origin and direction $direction"
+        new(origin, direction)
+    end
 end
 @inline (ray::Ray)(t) = ray.origin + t * ray.direction
 
@@ -231,7 +235,7 @@ end
     into = cosθ > 0
 
     sinθ = sqrt(max(1 - cosθ^2, zero(F)))
-    @smart_assert !isnan(sinθ)
+    @assert_adapt !isnan(sinθ)
     
     if into
         ior_ratio = air_ior / ior
@@ -246,7 +250,7 @@ end
     else
         Rperp = ior_ratio * (ray.direction + cosθ * n⃗)
         Rpar = - sqrt(max(1 - norm2(Rperp), zero(F))) * n⃗
-        @smart_assert !isnan(Rpar)
+        @assert_adapt !isnan(Rpar)
 
         return normalize_fast(Rperp + Rpar)
     end
@@ -354,13 +358,13 @@ end
     r = current_state.ray
 
     if hit_record.sphere_index == 0 # nothing hit
-        @smart_assert all(world_color(r) .>= 0)
+        @assert_adapt all(world_color(r) .>= 0)
         atomic_add!(img, pixel_index, current_state.attenuation .* world_color(r))
     else
         position = r(hit_record.t)
         cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), hit_record.sphere_index, Val(16)))
         @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
-        @smart_assert isapprox(norm(normal), 1; atol=F(1e-2)) normal
+        @assert_adapt isapprox(norm(normal), 1; atol=F(1e-2)) normal
 
         material_data = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_material_data())), hit_record.sphere_index, Val(16)))
         @inbounds material_type = gpu_material_type()[hit_record.sphere_index]
@@ -405,7 +409,7 @@ end
     if hit_record.sphere_index == 0 # nothing hit
         # r = Ray(zeros(Point), Point(0, 0, @inbounds current_state.ray[i].direction.z))
         r = (point=zeros(Point), direction=Point(0, 0, @inbounds current_state.ray[i].direction.z)) # avoids checking direction is normalised
-        @smart_assert all(world_color(r) .>= 0)
+        @assert_adapt all(world_color(r) .>= 0)
         atomic_add!(img, pixel_index, r_attenuation .* world_color(r))
     else
         r = unsafe_cached_load_vectorized(pointer(current_state.ray, i), 1)
@@ -413,7 +417,7 @@ end
         position = r(hit_record.t)
         cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), hit_record.sphere_index, Val(16)))
         @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
-        @smart_assert isapprox(norm(normal), 1; atol=F(1e-2)) normal
+        @assert_adapt isapprox(norm(normal), 1; atol=F(1e-2)) normal
 
         material_data = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_material_data())), hit_record.sphere_index, Val(16)))
         @inbounds material_type = gpu_material_type()[hit_record.sphere_index]
