@@ -2,6 +2,7 @@ using BenchmarkTools
 macro smart_assert(ex, msg=nothing)
     return :($(esc(ex)))
 end
+const ASSERTIONS_DISABLED = true
 include("../src/RayTracingInOneWeekend.jl")
 
 const SUITE = BenchmarkGroup()

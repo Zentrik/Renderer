@@ -19,14 +19,16 @@ if CUDA.functional()
         return :($(esc(ex)) ? $(nothing) : @cuprintln(("Assertion failed at line $($(__source__.line))")) )
         # return :( $ex ? nothing : @cuprintln(("Assertion failed at line $($(__source__.line)): " * $(string(ex)))) )
     end
-
-    # macro assert_adapt(ex, msg=nothing)
-    #     return :($(esc(ex)))
-    # end
 else
     # SmartAsserts.set_enabled(false)
     const var"@time_adapt" = var"@time"
     const var"@assert_adapt" = var"@smart_assert"
+end
+
+if @isdefined(ASSERTIONS_DISABLED) && ASSERTIONS_DISABLED
+    macro assert_adapt(ex, msg=nothing)
+        return :($(esc(ex)))
+    end
 end
 
 const F = Float32
