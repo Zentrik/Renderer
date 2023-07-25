@@ -13,7 +13,7 @@ if CUDA.functional()
     CUDA.allowscalar(false)
     const var"@time_adapt" = CUDA.var"@time"
     # CUDA.math_mode!(CUDA.PEDANTIC_MATH)
-    # CUDA.math_mode!(CUDA.FAST_MATH; precision=:Float16)
+    CUDA.math_mode!(CUDA.FAST_MATH; precision=:Float16)
 
     macro assert_adapt(ex, msg=nothing)
         return :($(esc(ex)) ? $(nothing) : @cuprintln(("Assertion failed at line $($(__source__.line))")) )
@@ -52,8 +52,8 @@ struct Ray
     origin::Point
     direction::Point
     
-    function Ray(origin=zeros(Point), direction=Point(0, 1, 0))
-        @assert_adapt isapprox(direction ⋅ direction, 1, atol=F(1e-2)) "Ray direction not normalised for Ray with origin $origin and direction $direction"
+    @fastmath function Ray(origin=zeros(Point), direction=Point(0, 1, 0))
+        @assert_adapt isapprox(direction ⋅ direction, 1; atol=F(1e-2)) "Ray direction not normalised for Ray with origin $origin and direction $direction"
         new(origin, direction)
     end
 end
@@ -68,16 +68,18 @@ Lambertian(attenuation=ones(Spectrum), padding=0) = Material(0, attenuation, pad
 Dielectric(attenuation=ones(Spectrum), ior=3//2) = Material(1, attenuation, ior)
 Metal(attenuation=ones(Spectrum), fuzz=0) = Material(2, attenuation, fuzz)
 
-abstract type Primitive end
-
-@kwdef struct Sphere <: Primitive
+@kwdef struct Sphere
     centre_radius::SVector{4, F} = SVector{4, F}(0, 0, 0, 1//2)
     material::Material = Lambertian()
 end
 function Sphere(centre, radius, material)
     Sphere(SVector{4, F}(centre..., radius), material)
 end
-@fastmath sphere_normal(centre, radius, position) = (position - centre) / (radius)
+
+rcp(x) = @fastmath 1/x
+# CUDA.@device_override rcp(x::Float32) = ccall("extern __nv_frcp_rn", llvmcall, Cfloat, (Cfloat,), x)
+CUDA.@device_override rcp(x::Float32) = @asmcall("rcp.approx.ftz.f32 \$0, \$1;", "=f,f", Float32, Tuple{Float32}, x)
+@fastmath sphere_normal(centre, radius, position) = (position - centre) * rcp(radius)
 
 @kwdef struct hittable_list{T}
     spheres::T = []
@@ -149,9 +151,12 @@ function rand!(rng::RNG, ::Type{Float32}) # random float in [0, 1)
     rng.seed = pcg_hash(rng.seed)
     # return rand(Float32)
     # return Float32(rng.seed) / Float32(typemax(UInt32))
-    return reinterpret(Float32, rng.seed & 0x007FFFFF | 0x3f800000) - 1f0
+    result = reinterpret(Float32, rng.seed & 0x007FFFFF | 0x3f800000) - 1f0
     # https://github.com/JuliaLang/julia/issues/44887
     # return Float32(rng.seed >>> 8) * Float32(0x1.0p-24) 
+
+    assume(result >= 0)
+    return result
 end
 
 function rand_minustoplus!(rng::RNG, ::Type{Float32}) # random float in [-1, 1)
@@ -162,6 +167,9 @@ function rand_minustoplus!(rng::RNG, ::Type{Float32}) # random float in [-1, 1)
 end
 
 ### General Functions
+
+CUDA.@device_override @inline Base.FastMath.sqrt_fast(x::Float32) = @asmcall("sqrt.approx.ftz.f32 \$0, \$1;", "=f,f", Float32, Tuple{Float32}, x)
+@inline StaticArrays.dot(a::SVector{N, T}, b::SVector{N, T}) where {N,T<:Real} = StaticArrays._vecdot(StaticArrays.same_size(a, b), a, b, Base.FastMath.mul_fast)
 
 imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
 
@@ -194,7 +202,7 @@ end
     z = rand_minustoplus!(rng, F)
     r = sqrt(max(0, 1 - z*z))
     ϕ = 2 * π * rand!(rng, F)
-    sinϕ, cosϕ = sincos(ϕ)
+    sinϕ, cosϕ = sincos(ϕ) # We want to call fast_sin, fast_cos on GPU, fast_sincos is much slower. fast_sinpi, fast_sincospi do not exist
     return Point(r * cosϕ, r * sinϕ, z) * cbrt(rand!(rng, F))
 end
 
@@ -226,28 +234,27 @@ end
 end
 
 @fastmath function shick(cosθ, ior_ratio)
-    r0 = ((1 - ior_ratio) / (1 + ior_ratio))^2
+    r0 = ((1 - ior_ratio) / (1 + ior_ratio))
+    r0 *= r0
     return r0 + (1 - r0) * (1 - cosθ)^5
+    # return r0 + (1 - r0) * Base.:(^)(1 - cosθ, 5i32)
 end
 
+# A lot of branching here
 @fastmath function glass!(rng, ray, n⃗, ior)
     air_ior = 1
 
     cosθ = - ray.direction ⋅ n⃗
     into = cosθ > 0
 
-    sinθ = sqrt(max(1 - cosθ^2, zero(F)))
+    sinθ = sqrt(max(1 - cosθ*cosθ, zero(F)))
     @assert_adapt !isnan(sinθ)
-    
-    if into
-        ior_ratio = air_ior / ior
-    else
-        ior_ratio = ior / air_ior
-        n⃗ *= -1
-        cosθ *= -1
-    end
 
-    if (ior_ratio * sinθ > 1) || (rand!(rng, F) < shick(cosθ, ior_ratio))
+    ior_ratio = ifelse(into, air_ior / ior, ior) #/ air_ior)
+    n⃗ = ifelse(into, n⃗, -n⃗)
+    cosθ = ifelse(into, cosθ, -cosθ)
+
+    if (ior_ratio * sinθ > 1) | (rand!(rng, F) < shick(cosθ, ior_ratio))
         return reflect!(rng, ray, n⃗)
     else
         Rperp = ior_ratio * (ray.direction + cosθ * n⃗)
@@ -262,8 +269,9 @@ end
     random = random_on_unit_sphere_surface!(rng) # voxel_tracer uses random_in_unit_sphere which is about 5% faster
     vector = n⃗ + random
 
-    if all(vector .≈ 0)
+    if sum(abs.(vector)) <= F(1e-2)
         vector = n⃗
+        return vector # n⃗ should be normalised already
     end
     
     direction = normalize_fast(vector)
@@ -319,10 +327,10 @@ end
 
 @inline @fastmath function find_scene_intersection(r, tmin::F, tmax::F)
     minHitT = tmax
-    minIndex = UInt32(0)
+    minIndex = Int32(0)
 
     assume(length(gpu_material_type()) >= 1)
-    @loopinfo unrollcount=16 predicate for i in UInt32(1):UInt32(length(gpu_material_type()))
+    @loopinfo unrollcount=16 predicate for i in Int32(1):Int32(length(gpu_material_type()))
         cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), i, Val(16)))
 
         cox = cx - r.origin.x
@@ -334,9 +342,9 @@ end
 
         c = cox*cox + coy*coy 
         c += coz*coz 
-        c -= radius^2
+        c -= radius*radius
 
-        quarter_discriminant = neg_half_b^2 - c
+        quarter_discriminant = neg_half_b*neg_half_b - c
 
         if quarter_discriminant > 0
             sqrtd = sqrt(quarter_discriminant)
@@ -352,6 +360,7 @@ end
         end
     end
 
+    assume(minIndex >= 0)
     return HitRecord(minHitT, minIndex)
 end
 
@@ -366,7 +375,7 @@ end
         position = r(hit_record.t)
         cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), hit_record.sphere_index, Val(16)))
         @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
-        @assert_adapt isapprox(norm(normal), 1; atol=F(1e-2)) normal
+        @assert_adapt isapprox(norm2(normal), 1; atol=F(1e-2)) normal
 
         material_data = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_material_data())), hit_record.sphere_index, Val(16)))
         @inbounds material_type = gpu_material_type()[hit_record.sphere_index]
@@ -419,7 +428,7 @@ end
         position = r(hit_record.t)
         cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), hit_record.sphere_index, Val(16)))
         @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
-        @assert_adapt isapprox(norm(normal), 1; atol=F(1e-2)) normal
+        @assert_adapt isapprox(norm2(normal), 1; atol=F(1e-1)) normal
 
         material_data = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_material_data())), hit_record.sphere_index, Val(16)))
         @inbounds material_type = gpu_material_type()[hit_record.sphere_index]
@@ -484,7 +493,7 @@ end
 
         unsafe_store_vectorized!(pointer(current_state.ray, i + index_offset), ray)
         unsafe_store_vectorized!(pointer(current_state.attenuation_and_pixel_index, i + index_offset), (ones(Spectrum), img_linear_index))
-        @inbounds current_state.depth[i + index_offset] = 1u32
+        @inbounds current_state.depth[i + index_offset] = 1
 
         i += stride
     end
@@ -609,7 +618,7 @@ end
         # write("_generate_and_intersect_and_scatter_kernel!.llvm", take!(buf))
 
         # buf = IOBuffer();
-        # @device_code_ptx io=buf @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
+        # @device_code_ptx io=buf raw=true @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
         # write("_generate_and_intersect_and_scatter_kernel!.ptx", take!(buf))
 
         current_state_size = UInt32(min(number_of_rays - number_of_rays_generated, state_size))

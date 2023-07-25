@@ -6,6 +6,7 @@ version = "0.2.0"
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
+GPUCompiler = "61eb1bfa-7361-4325-ad38-22787b887f55"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
 LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 LLVMLoopInfo = "8b046642-f1f6-4319-8d3c-209ddc03c586"
