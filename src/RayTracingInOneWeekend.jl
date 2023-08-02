@@ -4,11 +4,6 @@ using StaticArrays, LinearAlgebra, Images, StructArrays, CUDA, Random, MLStyle, 
 using Core: LLVMPtr
 using LLVM, LLVM.Interop
 
-struct Literal{T} end
-Base.:(*)(x, ::Type{Literal{T}}) where {T} = T(x)
-const i32 = Literal{Int32}
-const u32 = Literal{UInt32}
-
 if CUDA.functional()
     CUDA.allowscalar(false)
     const var"@time_adapt" = CUDA.var"@time"
@@ -20,11 +15,11 @@ if CUDA.functional()
         # return :( $ex ? nothing : @cuprintln(("Assertion failed at line $($(__source__.line)): " * $(string(ex)))) )
     end
 else
-    # SmartAsserts.set_enabled(false)
     const var"@time_adapt" = var"@time"
     const var"@assert_adapt" = var"@smart_assert"
 end
 
+# const ASSERTIONS_DISABLED = true
 if @isdefined(ASSERTIONS_DISABLED) && ASSERTIONS_DISABLED
     macro assert_adapt(ex, msg=nothing)
         return :($(esc(ex)))
@@ -34,6 +29,11 @@ end
 const F = Float32
 
 ### TYPES
+struct Literal{T} end
+Base.:(*)(x, ::Type{Literal{T}}) where {T} = T(x)
+const i32 = Literal{Int32}
+const u32 = Literal{UInt32}
+
 const VE        = Base.VecElement
 const Vec{N, T} = NTuple{N, VE{T}}
 # https://discourse.julialang.org/t/help-defining-masked-vload-and-vstore-operations-for-sarrays-or-other-isbits-structs-using-llvmcall/17291
@@ -240,7 +240,6 @@ end
     # return r0 + (1 - r0) * Base.:(^)(1 - cosθ, 5i32)
 end
 
-# A lot of branching here
 @fastmath function glass!(rng, ray, n⃗, ior)
     air_ior = 1
 
@@ -250,7 +249,8 @@ end
     sinθ = sqrt(max(1 - cosθ*cosθ, zero(F)))
     @assert_adapt !isnan(sinθ)
 
-    ior_ratio = ifelse(into, air_ior / ior, ior) #/ air_ior)
+    # ior_ratio = ifelse(into, air_ior / ior, ior / air_ior)
+    ior_ratio = ifelse(into, rcp(ior), ior)
     n⃗ = ifelse(into, n⃗, -n⃗)
     cosθ = ifelse(into, cosθ, -cosθ)
 
@@ -269,9 +269,8 @@ end
     random = random_on_unit_sphere_surface!(rng) # voxel_tracer uses random_in_unit_sphere which is about 5% faster
     vector = n⃗ + random
 
-    if sum(abs.(vector)) <= F(1e-2)
-        vector = n⃗
-        return vector # n⃗ should be normalised already
+    if sum(abs.(vector)) <= F(1e-2) # quick way to check if vector ≈ 0
+        return n⃗ # n⃗ should be normalised already
     end
     
     direction = normalize_fast(vector)
@@ -300,12 +299,8 @@ end
 
     return Ray(Point(ox, oy, oz), Point(dx, dy, dz))
 end
-@inline function unsafe_cached_load_vectorized(ptr::LLVMPtr{HitRecord, CUDA.AS.Global})
-    t, sphere_index = to_tup(unsafe_cached_load(LLVMPtr{Vec{2, F}}(ptr), 1, Val(8)))
-    return HitRecord(t, reinterpret(UInt32, sphere_index))
-end
-@inline function unsafe_cached_load_vectorized(ptr::LLVMPtr{Tuple{Spectrum, UInt32},CUDA.AS.Global})
-    s1, s2, s3, pixel_index = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(ptr), 1, Val(16)))
+@inline function unsafe_load_vectorized(ptr::LLVMPtr{Tuple{Spectrum, UInt32},CUDA.AS.Global})
+    s1, s2, s3, pixel_index = to_tup(unsafe_load(LLVMPtr{Vec{4, F}}(ptr), 1, Val(16)))
     return Spectrum(s1, s2, s3), reinterpret(UInt32, pixel_index)
 end
 
@@ -413,59 +408,7 @@ end
 
     return nothing
 end
-@fastmath function scatter!(rng, img, next_state, current_state, i, next_state_index, hit_record, max_depth)
-    r_attenuation, pixel_index = unsafe_load(pointer(current_state.attenuation_and_pixel_index, i))
 
-
-    if hit_record.sphere_index == 0 # nothing hit
-        # r = Ray(zeros(Point), Point(0, 0, @inbounds current_state.ray[i].direction.z))
-        r = (point=zeros(Point), direction=Point(0, 0, @inbounds current_state.ray[i].direction.z)) # avoids checking direction is normalised
-        @assert_adapt all(world_color(r) .>= 0)
-        atomic_add!(img, pixel_index, r_attenuation .* world_color(r))
-    else
-        r = unsafe_cached_load_vectorized(pointer(current_state.ray, i), 1)
-
-        position = r(hit_record.t)
-        cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), hit_record.sphere_index, Val(16)))
-        @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
-        @assert_adapt isapprox(norm2(normal), 1; atol=F(1e-1)) normal
-
-        material_data = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_material_data())), hit_record.sphere_index, Val(16)))
-        @inbounds material_type = gpu_material_type()[hit_record.sphere_index]
-        material = Material(material_type, material_data)
-
-        if material.type == 0
-            direction = lambertian!(rng, normal)
-            scatter_again = true
-        elseif material.type == 1
-            ior = material.data[4]
-            direction = glass!(rng, r, normal, ior)
-            scatter_again = true
-        else # not doing a check here is important about 10%, goes from 38ms to 34.5ms (i.e. on par with expronicon)
-            fuzz = material.data[4]
-            direction, scatter_again = metal!(rng, r, normal, fuzz)
-        end
-
-        # if scatter_again
-            attenuation = Spectrum(@view material.data[1:3])
-
-            new_attenuation = ifelse(scatter_again, r_attenuation .* attenuation, zeros(Spectrum))
-
-            @inbounds if current_state.depth[i] == max_depth
-                atomic_add!(img, pixel_index, r_attenuation .* world_color(r))
-            elseif scatter_again
-                old_index = CUDA.atomic_add!(pointer(next_state_index), 1i32)
-
-                unsafe_store_vectorized!(pointer(next_state.ray, old_index), Ray(position, direction))
-                # Don't actually need to rewrite pixel_index though it enables vectorization
-                unsafe_store_vectorized!(pointer(next_state.attenuation_and_pixel_index, old_index), (new_attenuation, pixel_index))
-                @inbounds next_state.depth[old_index] = current_state.depth[i] + 1u32
-            end
-        # end
-    end
-
-    return nothing
-end
 @fastmath function generate_ray!(rng, pixel_position, camera)
     random_pixel_position = pixel_position + rand!(rng, F) * camera.right + rand!(rng, F) * camera.down
 
@@ -515,9 +458,11 @@ function intersect_and_scatter_kernel!(img, next_state, current_state, max_depth
 
         hit_record = find_scene_intersection(ray, tmin, tmax)
 
-        @inbounds _, pixel_index = unsafe_load(pointer(current_state.attenuation_and_pixel_index, i))
-        @inbounds rng = RNG(pixel_index * (i + number_of_rays_generated) + current_state.depth[i])
-        scatter!(rng, img, next_state, current_state, i, next_state_index, hit_record, max_depth)
+        @inbounds attenuation, pixel_index = unsafe_load_vectorized(pointer(current_state.attenuation_and_pixel_index, i))
+        @inbounds depth = current_state.depth[i]
+        rng = RNG(pixel_index * (i + number_of_rays_generated) + depth)
+        state = BufferData(ray, attenuation, pixel_index, depth)
+        scatter!(rng, img, next_state, state, next_state_index, hit_record, max_depth)
         i += stride
     end
 
@@ -562,7 +507,6 @@ function undef_array(::Type{T}, sz; unwrap::F = StructArrays.alwaysfalse) where 
     end
 end
 
-
 @fastmath function render!(img, HittableList, camera=Camera(); tmin=F(1e-4), tmax=F(Inf), samples_per_pixel=100, max_depth=16, parallel=:GPU)
     if parallel == :GPU
         rays_traced = 0
@@ -605,7 +549,7 @@ end
         # @device_code_llvm io=buf @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated)
         # write("intersect_and_scatter_kernel!.llvm", take!(buf))
 
-       _generate_and_intersect_and_scatter_kernel! = @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
+        _generate_and_intersect_and_scatter_kernel! = @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
         _generate_and_intersect_and_scatter_kernel!_config = launch_configuration(_generate_and_intersect_and_scatter_kernel!.fun)
         # @show CUDA.registers(_generate_and_intersect_and_scatter_kernel!)
         # @show CUDA.memory(_generate_and_intersect_and_scatter_kernel!)
