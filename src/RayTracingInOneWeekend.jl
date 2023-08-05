@@ -76,7 +76,7 @@ struct Ray
     direction::Point
     
     @fastmath function Ray(origin=zeros(Point), direction=Point(0, 1, 0))
-        # @assert_adapt isapprox(direction ⋅ direction, 1; atol=F(1e-4)) "Ray direction not normalised, $(norm(direction)) for Ray with origin [$(origin.x), $(origin.y), $(origin.z)] and direction [$(direction.x), $(direction.y), $(direction.z)]"
+        @assert_adapt isapprox(direction ⋅ direction, 1; atol=F(1e-4)) "Ray direction not normalised, $(norm(direction)) for Ray with origin [$(origin.x), $(origin.y), $(origin.z)] and direction [$(direction.x), $(direction.y), $(direction.z)]"
         new(origin, direction)
     end
 end
@@ -388,14 +388,13 @@ end
     return HitRecord(minHitT, minIndex)
 end
 
-@fastmath function scatter!(rng, img, states, index, state, hit_record, max_depth)
-    pixel_index = state.pixel_index
-    r = state.ray
+@fastmath function scatter!(rng, img, next_state, current_state, next_state_index, hit_record, max_depth)
+    pixel_index = current_state.pixel_index
+    r = current_state.ray
 
     if hit_record.sphere_index == 0 # nothing hit
         @assert_adapt all(world_color(r) .>= 0)
-        atomic_add!(img, pixel_index, state.attenuation .* world_color(r))
-        @inbounds states.depth[index] = max_depth # so state.depth == max_depth implies terminated state
+        atomic_add!(img, pixel_index, current_state.attenuation .* world_color(r))
     else
         position = r(hit_record.t)
         cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), hit_record.sphere_index, Val(16)))
@@ -423,19 +422,17 @@ end
         # if scatter_again
             attenuation = Spectrum(@view material.data[1:3])
 
-            new_attenuation = ifelse(scatter_again, state.attenuation .* attenuation, zeros(Spectrum))
+            new_attenuation = ifelse(scatter_again, current_state.attenuation .* attenuation, zeros(Spectrum))
 
-            if state.depth == max_depth
+            if current_state.depth == max_depth
                 atomic_add!(img, pixel_index, new_attenuation)
             elseif scatter_again
+                old_index = CUDA.atomic_add!(pointer(next_state_index), 1i32)
 
-                @assert_adapt isapprox(direction ⋅ direction, 1; atol=F(1e-4)) "Ray direction not normalised, $(norm(direction)) for Ray with origin [$(position.x), $(position.y), $(position.z)] and direction [$(direction.x), $(direction.y), $(direction.z)]"
-                unsafe_store_vectorized!(pointer(states.ray, index), Ray(position, direction))
+                unsafe_store_vectorized!(pointer(next_state.ray, old_index), Ray(position, direction))
                 # Don't actually need to rewrite pixel_index though it enables vectorization
-                unsafe_store_vectorized!(pointer(states.attenuation_and_pixel_index, index), (new_attenuation, pixel_index))
-                @inbounds states.depth[index] = state.depth + 1u32 # when running from generate_and_intersect_and_scatter_kernel, states is uninitialised thus we should not read from it.
-            else
-                @inbounds states.depth[index] = max_depth # so state.depth == max_depth implies terminated state
+                unsafe_store_vectorized!(pointer(next_state.attenuation_and_pixel_index, old_index), (new_attenuation, pixel_index))
+                @inbounds next_state.depth[old_index] = current_state.depth + 1u32
             end
         # end
     end
@@ -451,34 +448,65 @@ end
 
     return Ray(camera.pinhole_location + defocus_offset, normalize_fast(random_pixel_position - camera.pinhole_location - defocus_offset))
 end
-function intersect_and_scatter_kernel!(img, states, max_depth, active_states_indices, active_states_size, tmin, tmax, number_of_rays_generated)
-    index = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
+@fastmath function generate_rays_kernel!(current_state, camera, column_size, current_state_size, offset, samples_per_pixel, index_offset)
+    index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
 
-    j = index
-    while j <= active_states_size
-        @inbounds i = active_states_indices[j]
-        @assert_adapt checkbounds(Bool, states.ray, i)
-        ray = unsafe_cached_load_vectorized(pointer(states.ray), i)
-        @assert_adapt isapprox(ray.direction ⋅ ray.direction, 1; atol=F(1e-4)) "Ray direction not normalised, $(norm(ray.direction)) for Ray with origin [$(ray.origin.x), $(ray.origin.y), $(ray.origin.z)] and direction [$(ray.direction.x), $(ray.direction.y), $(ray.direction.z)]"
+    i = index
+    while i <= current_state_size
+        assume(samples_per_pixel > 0)
+        assume(i > 0)
+        img_linear_index = 1u32 + UInt32((i - 1u32 + offset) ÷ samples_per_pixel)
 
-        hit_record = find_scene_intersection(ray, tmin, tmax)
+        assume(column_size > 0)
+        y = cld(img_linear_index, column_size)
+        x = mod1(img_linear_index, column_size)
 
-        @assert_adapt checkbounds(Bool, states.attenuation_and_pixel_index, i)
-        attenuation, pixel_index = unsafe_load_vectorized(pointer(states.attenuation_and_pixel_index, i))
-        @inbounds depth = states.depth[i]
-        rng = RNG(pixel_index * (i + number_of_rays_generated) + depth)
-        state = BufferData(ray, attenuation, pixel_index, depth)
-        scatter!(rng, img, states, i, state, hit_record, max_depth)
+        rng = RNG(img_linear_index * (i + offset))
+        ray = generate_ray!(rng, pixel_world_position(camera, F(x), F(y)), camera)
 
-        j += stride
+        unsafe_store_vectorized!(pointer(current_state.ray, i + index_offset), ray)
+        unsafe_store_vectorized!(pointer(current_state.attenuation_and_pixel_index, i + index_offset), (ones(Spectrum), img_linear_index))
+        @inbounds current_state.depth[i + index_offset] = 1
+
+        i += stride
     end
 
     return nothing
 end
-@fastmath function generate_and_intersect_and_scatter_kernel!(img, states, max_depth, rays_size, tmin, tmax, camera, offset, samples_per_pixel, column_size)
+function intersect_and_scatter_kernel!(img, next_state, current_state, max_depth, next_state_index, rays_size, tmin, tmax, number_of_rays_generated)
     index = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
+
+    # Only for Nsight compute prevents out of bound error
+    # if index == 1
+    #     next_state_index[] = 1
+    # end
+
+    i = index
+    while i <= rays_size
+        ray = unsafe_cached_load_vectorized(pointer(current_state.ray), i)
+
+        hit_record = find_scene_intersection(ray, tmin, tmax)
+
+        @inbounds attenuation, pixel_index = unsafe_load_vectorized(pointer(current_state.attenuation_and_pixel_index, i))
+        @inbounds depth = current_state.depth[i]
+        rng = RNG(pixel_index * (i + number_of_rays_generated) + depth)
+        state = BufferData(ray, attenuation, pixel_index, depth)
+        scatter!(rng, img, next_state, state, next_state_index, hit_record, max_depth)
+        i += stride
+    end
+
+    return nothing
+end
+@fastmath function generate_and_intersect_and_scatter_kernel!(img, next_state, max_depth, next_state_index, rays_size, tmin, tmax, camera, offset, samples_per_pixel, column_size)
+    index = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
+    stride = gridDim().x * blockDim().x
+
+    # Only for Nsight compute prevents out of bound error
+    # if index == 1
+    #     next_state_index[] = 1
+    # end
 
     i = index
     while i <= rays_size
@@ -492,37 +520,11 @@ end
 
         rng = RNG(img_linear_index * (i + offset))
         ray = generate_ray!(rng, pixel_world_position(camera, F(x), F(y)), camera)
-        state = BufferData(ray, ones(Spectrum), img_linear_index, 1)
+        current_state = BufferData(ray, ones(Spectrum), img_linear_index, 1)
 
         hit_record = find_scene_intersection(ray, tmin, tmax)
-        scatter!(rng, img, states, i, state, hit_record, max_depth)
-
+        scatter!(rng, img, next_state, current_state, next_state_index, hit_record, max_depth)
         i += stride
-    end
-
-    return nothing
-end
-
-# https://github.com/blender/cycles/blob/main/src/kernel/device/gpu/parallel_active_index.h#L29
-function generate_active_states_indices!(active_states_indices, states, max_depth, active_states_size, new_active_states_size)
-    index = (blockIdx().x - 1i32) * blockDim().x + threadIdx().x
-    stride = gridDim().x * blockDim().x
-
-    j = index
-    while j <= active_states_size
-        @inbounds i = active_states_indices[j]
-        @inbounds depth = states.depth[i]
-
-        # is_active = depth == max_depth
-        # thread_offset = CUDA.popc
-
-        @assert_adapt depth <= max_depth
-        if depth != max_depth
-            old_index = CUDA.atomic_add!(pointer(new_active_states_size), 1i32)
-            @inbounds active_states_indices[old_index] = i
-        end
-
-        j += stride
     end
 
     return nothing
@@ -553,23 +555,22 @@ end
         number_of_rays = samples_per_pixel*length(img)
 
         max_state_size::Int32 = 10^7
-        states_size::Int32 = min(number_of_rays, max_state_size)
+        state_size::Int32 = min(number_of_rays, max_state_size)
 
-        states = StructArrays.buildfromschema(typ -> undef_array(typ, (states_size,)), BufferData);
-
-        active_states_indices = CuArray{Int32}(collect(eachindex(states)))
-        active_states_size = states_size
-        new_active_states_size = CuArray{Int32}([1])
-        data_for_scattering = CuArray{HitRecord}(undef, states_size)
+        current_state = StructArrays.buildfromschema(typ -> undef_array(typ, (state_size,)), BufferData);
+        next_state = StructArrays.buildfromschema(typ -> undef_array(typ, (state_size,)), BufferData);
+        data_for_scattering = CuArray{HitRecord}(undef, state_size)
 
         number_of_rays_generated::UInt32 = 0
 
+        current_state_size::Int32 = min(number_of_rays - number_of_rays_generated, state_size)
         if number_of_rays > typemax(UInt32)
             throw("Overflow 2")
         end
+        next_state_index = CuArray{Int32}([1])
 
-        # _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(states, active_states_indices, camera, UInt32(size(img)[1]), states_size, number_of_rays_generated, UInt32(samples_per_pixel), Int32(0))
-        # _generate_rays_kernel!_config = launch_configuration(_generate_rays_kernel!.fun)
+        _generate_rays_kernel! = @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, UInt32(size(img)[1]), current_state_size, number_of_rays_generated, UInt32(samples_per_pixel), Int32(0))
+        _generate_rays_kernel!_config = launch_configuration(_generate_rays_kernel!.fun)
         # @show CUDA.registers(_generate_rays_kernel!)
         # @show CUDA.memory(_generate_rays_kernel!)
 
@@ -577,96 +578,89 @@ end
         # @device_code_llvm io=buf @cuda launch=false always_inline=true generate_rays_kernel!(current_state, camera, UInt32(size(img)[1]), current_state_size, number_of_rays_generated, UInt32(samples_per_pixel), Int32(0))
         # write("_generate_rays_kernel!.llvm", take!(buf))
 
-        _intersect_and_scatter_kernel! = @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, states, UInt32(max_depth), active_states_indices, active_states_size, tmin, tmax, number_of_rays_generated)
+        _intersect_and_scatter_kernel! = @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated)
         _intersect_and_scatter_kernel!_config = launch_configuration(_intersect_and_scatter_kernel!.fun)
         # @show CUDA.registers(_intersect_and_scatter_kernel!)
         # @show CUDA.memory(_intersect_and_scatter_kernel!)
         # @show _intersect_and_scatter_kernel!_config
 
-        # @device_code_warntype interactive=true @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, states, UInt32(max_depth), active_states_indices, active_states_size, tmin, tmax, number_of_rays_generated)
+        # @device_code_warntype interactive=true @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated)
 
         # buf = IOBuffer();
-        # @device_code_llvm io=buf @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, states, UInt32(max_depth), active_states_indices, active_states_size, tmin, tmax, number_of_rays_generated)
+        # @device_code_llvm io=buf @cuda launch=false always_inline=true intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated)
         # write("intersect_and_scatter_kernel!.llvm", take!(buf))
 
-        _generate_active_states_indices! = @cuda launch=false always_inline=true generate_active_states_indices!(active_states_indices, states, UInt32(max_depth), active_states_size, new_active_states_size)
-        _generate_active_states_indices!_config = launch_configuration(_generate_active_states_indices!.fun)
-
-        _generate_and_intersect_and_scatter_kernel! = @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, states, UInt32(max_depth), states_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
+        _generate_and_intersect_and_scatter_kernel! = @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
         _generate_and_intersect_and_scatter_kernel!_config = launch_configuration(_generate_and_intersect_and_scatter_kernel!.fun)
         # @show CUDA.registers(_generate_and_intersect_and_scatter_kernel!)
         # @show CUDA.memory(_generate_and_intersect_and_scatter_kernel!)
         # @show _generate_and_intersect_and_scatter_kernel!_config
 
-        # @device_code_warntype interactive=true @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, states, UInt32(max_depth), states_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
+        # @device_code_warntype interactive=true @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
 
         # buf = IOBuffer();
-        # @device_code_llvm io=buf @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, states, UInt32(max_depth), states_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
+        # @device_code_llvm io=buf @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
         # write("_generate_and_intersect_and_scatter_kernel!.llvm", take!(buf))
 
         # buf = IOBuffer();
-        # @device_code_ptx io=buf raw=true @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, states, UInt32(max_depth), states_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
+        # @device_code_ptx io=buf raw=true @cuda launch=false always_inline=true generate_and_intersect_and_scatter_kernel!(img, next_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]))
         # write("_generate_and_intersect_and_scatter_kernel!.ptx", take!(buf))
 
-        _generate_and_intersect_and_scatter_kernel!_threads = min(states_size, _generate_and_intersect_and_scatter_kernel!_config.threads)
-        _generate_and_intersect_and_scatter_kernel!_blocks = cld(states_size, _generate_and_intersect_and_scatter_kernel!_threads)
+        current_state_size = UInt32(min(number_of_rays - number_of_rays_generated, state_size))
+
+        # _generate_rays_kernel!_threads = min(current_state_size, _generate_rays_kernel!_config.threads)
+        # _generate_rays_kernel!_blocks = cld(current_state_size, _generate_rays_kernel!_threads)
+        # _generate_rays_kernel!(current_state, camera, size(img)[1], current_state_size, number_of_rays_generated, UInt32(samples_per_pixel); threads=_generate_rays_kernel!_threads, blocks=_generate_rays_kernel!_blocks)
+
+        _generate_and_intersect_and_scatter_kernel!_threads = min(current_state_size, _generate_and_intersect_and_scatter_kernel!_config.threads)
+        _generate_and_intersect_and_scatter_kernel!_blocks = cld(current_state_size, _generate_and_intersect_and_scatter_kernel!_threads)
         # _generate_and_intersect_and_scatter_kernel!_blocks = 60
-        # min(_generate_and_intersect_and_scatter_kernel!_config.blocks, cld(states_size, _generate_and_intersect_and_scatter_kernel!_threads))
+        # min(_generate_and_intersect_and_scatter_kernel!_config.blocks, cld(current_state_size, _generate_and_intersect_and_scatter_kernel!_threads))
         # @show Int(_generate_and_intersect_and_scatter_kernel!_blocks)
+        _generate_and_intersect_and_scatter_kernel!(img, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]); threads=_generate_and_intersect_and_scatter_kernel!_threads, blocks=_generate_and_intersect_and_scatter_kernel!_blocks)
 
-        while number_of_rays > number_of_rays_generated
-            # states = StructArrays.buildfromschema(typ -> undef_array(typ, (states_size,)), BufferData);
+        number_of_rays_generated += current_state_size
+        
+        rays_traced += current_state_size
+        current_state_size = CUDA.@allowscalar next_state_index[] - Int32(1)
+        CUDA.@allowscalar next_state_index[] = Int32(1)
 
-            rays_to_generate = UInt32(min(number_of_rays - number_of_rays_generated, states_size))
+        while current_state_size > 0
+            free_slots = UInt32(min(number_of_rays - number_of_rays_generated, state_size - current_state_size))
+            if free_slots > 0
+                _generate_rays_kernel!_threads = min(free_slots, _generate_rays_kernel!_config.threads)
+                _generate_rays_kernel!_blocks = cld(free_slots, _generate_rays_kernel!_threads)
+                _generate_rays_kernel!(current_state, camera, UInt32(size(img)[1]), free_slots, number_of_rays_generated, UInt32(samples_per_pixel), current_state_size; threads=_generate_rays_kernel!_threads, blocks=_generate_rays_kernel!_blocks)
 
-            _generate_and_intersect_and_scatter_kernel!(img, states, UInt32(max_depth), rays_to_generate, tmin, tmax, camera, number_of_rays_generated, UInt32(samples_per_pixel), UInt32(size(img)[1]); threads=_generate_and_intersect_and_scatter_kernel!_threads, blocks=_generate_and_intersect_and_scatter_kernel!_blocks)
-            number_of_rays_generated += rays_to_generate
-
-            rays_traced += rays_to_generate
-
-            active_states_indices .= 1:states_size
-            active_states_size = rays_to_generate
-
-            CUDA.@allowscalar new_active_states_size[] = 1i32
-            _generate_active_states_indices!_threads = min(rays_to_generate, _generate_active_states_indices!_config.threads)
-            _generate_active_states_indices!_blocks = cld(rays_to_generate, _generate_active_states_indices!_threads)
-            _generate_active_states_indices!(active_states_indices, states, UInt32(max_depth), active_states_size, new_active_states_size; threads=_generate_active_states_indices!_threads, blocks=_generate_active_states_indices!_blocks)
-            active_states_size = CUDA.@allowscalar new_active_states_size[] - 1i32
-            
-            while active_states_size > 0
-                # CUDA.@sync begin
-
-                    _intersect_and_scatter_kernel!_threads = min(active_states_size, _intersect_and_scatter_kernel!_config.threads)
-                    _intersect_and_scatter_kernel!_blocks = cld(active_states_size, _intersect_and_scatter_kernel!_threads)
-                    _intersect_and_scatter_kernel!(img, states, UInt32(max_depth), active_states_indices, active_states_size, tmin, tmax, number_of_rays_generated; threads=_intersect_and_scatter_kernel!_threads, blocks=_intersect_and_scatter_kernel!_blocks)
-
-                    rays_traced += active_states_size
-
-                    CUDA.@allowscalar new_active_states_size[] = 1i32
-                    _generate_active_states_indices!_threads = min(active_states_size, _generate_active_states_indices!_config.threads)
-                    _generate_active_states_indices!_blocks = cld(active_states_size, _generate_active_states_indices!_threads)
-                    _generate_active_states_indices!(active_states_indices, states, UInt32(max_depth), active_states_size, new_active_states_size; threads=_generate_active_states_indices!_threads, blocks=_generate_active_states_indices!_blocks)
-                    active_states_size = CUDA.@allowscalar new_active_states_size[] - 1i32
-
-                    # synchronize()
-                    # CUDA.@sync begin
-                    #     Main.active_states_indices = Array(active_states_indices) # need to copy as we free them at the end of this function
-                    #     Main.active_states_size = active_states_size
-                    #     Main.states = replace_storage(Array, states)
-                    # end
-
-                # end
+                number_of_rays_generated += free_slots
+                current_state_size += free_slots
             end
+
+            # _intersect_and_scatter_kernel!_threads = 256
+            _intersect_and_scatter_kernel!_threads = min(current_state_size, _intersect_and_scatter_kernel!_config.threads)
+            _intersect_and_scatter_kernel!_blocks = cld(current_state_size, _intersect_and_scatter_kernel!_threads)
+            # _intersect_and_scatter_kernel!_blocks = min(_intersect_and_scatter_kernel!_config.blocks, cld(current_state_size, _intersect_and_scatter_kernel!_threads))
+            # _intersect_and_scatter_kernel!_blocks = min(60, cld(current_state_size, _intersect_and_scatter_kernel!_threads))
+            _intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated; threads=_intersect_and_scatter_kernel!_threads, blocks=_intersect_and_scatter_kernel!_blocks)
+            
+            tmp = current_state;
+            current_state = next_state;
+            next_state = tmp;
+            
+            rays_traced += current_state_size
+            current_state_size = CUDA.@allowscalar next_state_index[] - 1i32
+            CUDA.@allowscalar next_state_index[] = 1i32
         end
+
         img ./= samples_per_pixel
-
-        # println(rays_traced)
-
-        # https://github.com/JuliaCI/BenchmarkTools.jl/issues/127
-        CUDA.unsafe_free!(data_for_scattering)
-        CUDA.unsafe_free!(active_states_indices)
-        StructArrays.foreachfield(CUDA.unsafe_free!, states)
     end
+
+    # println(rays_traced)
+
+    # https://github.com/JuliaCI/BenchmarkTools.jl/issues/127
+    CUDA.unsafe_free!(data_for_scattering)
+    StructArrays.foreachfield(CUDA.unsafe_free!, current_state)
+    StructArrays.foreachfield(CUDA.unsafe_free!, next_state)
 
     return nothing
 end
