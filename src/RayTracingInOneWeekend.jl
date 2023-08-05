@@ -3,15 +3,28 @@
 using StaticArrays, LinearAlgebra, Images, StructArrays, CUDA, Random, MLStyle, LLVMLoopInfo, SmartAsserts
 using Core: LLVMPtr
 using LLVM, LLVM.Interop
+import Base.@inbounds
 
 if CUDA.functional()
-    CUDA.allowscalar(false)
+    # CUDA.allowscalar(false)
     const var"@time_adapt" = CUDA.var"@time"
     # CUDA.math_mode!(CUDA.PEDANTIC_MATH)
     CUDA.math_mode!(CUDA.FAST_MATH; precision=:Float16)
 
-    macro assert_adapt(ex, msg=nothing)
-        return :($(esc(ex)) ? $(nothing) : @cuprintln(("Assertion failed at line $($(__source__.line))")) )
+    macro assert_adapt(ex)
+        return esc(:(
+            $ex ? nothing : @cuprintln("Assertion failed at line $($(__source__.line))") 
+        ))
+    end
+
+    macro assert_adapt(ex, msg...)
+        # return esc(:(@cuprint $(msg)))
+        # return :($(esc(ex)) ? $nothing : @cuprint("Assertion failed at line $($(__source__.line))\n", $msg) )
+
+        return esc(:(
+            $ex ? nothing : @cuprintln("Assertion failed at line $($(__source__.line))\n    ", $(msg...) ) 
+        ))
+
         # return :( $ex ? nothing : @cuprintln(("Assertion failed at line $($(__source__.line)): " * $(string(ex)))) )
     end
 else
@@ -19,10 +32,20 @@ else
     const var"@assert_adapt" = var"@smart_assert"
 end
 
-# const ASSERTIONS_DISABLED = true
-if @isdefined(ASSERTIONS_DISABLED) && ASSERTIONS_DISABLED
-    macro assert_adapt(ex, msg=nothing)
-        return :($(esc(ex)))
+if !@isdefined(ASSERTIONS)
+    ASSERTIONS = :ALL
+end
+if ASSERTIONS == :NONE
+    macro assert_adapt(ex, msg...)
+        return nothing
+    end
+    macro assert_adapt(ex)
+        return nothing
+    end
+elseif ASSERTIONS == :NO_BOUNDS_CHECKING
+elseif ASSERTIONS == :ALL
+    macro inbounds(blk)
+        return :($(esc(blk)))
     end
 end
 
@@ -53,7 +76,7 @@ struct Ray
     direction::Point
     
     @fastmath function Ray(origin=zeros(Point), direction=Point(0, 1, 0))
-        @assert_adapt isapprox(direction ⋅ direction, 1; atol=F(1e-2)) "Ray direction not normalised for Ray with origin $origin and direction $direction"
+        @assert_adapt isapprox(direction ⋅ direction, 1; atol=F(1e-4)) "Ray direction not normalised, $(norm(direction)) for Ray with origin [$(origin.x), $(origin.y), $(origin.z)] and direction [$(direction.x), $(direction.y), $(direction.z)]"
         new(origin, direction)
     end
 end
@@ -270,16 +293,18 @@ end
     vector = n⃗ + random
 
     if sum(abs.(vector)) <= F(1e-2) # quick way to check if vector ≈ 0
+        @assert_adapt isapprox(norm2(n⃗), 1; atol=F(1e-4)) "normal not normalised, $(norm(n⃗)) [$(n⃗.x), $(n⃗.y), $(n⃗.z)]"
         return n⃗ # n⃗ should be normalised already
     end
     
-    direction = normalize_fast(vector)
-    return direction
+    return normalize_fast(vector)
 end
 
 ### Load/ Stores
 
 @inline function atomic_add!(img::AbstractArray{Spectrum}, pixel_index, attenuation)
+    @assert_adapt checkbounds(Bool, img, pixel_index)
+
     CUDA.atomic_add!(LLVMPtr{Float32}(pointer(img, pixel_index)), attenuation[1])
     CUDA.atomic_add!(LLVMPtr{Float32}(pointer(img, pixel_index)) + sizeof(Float32), attenuation[2])
     CUDA.atomic_add!(LLVMPtr{Float32}(pointer(img, pixel_index)) + 2*sizeof(Float32), attenuation[3])
@@ -296,6 +321,8 @@ end
 
     ptr += 2*sizeof(Float32)
     dy, dz = to_tup(unsafe_cached_load(LLVMPtr{Vec{2, F}}(ptr), 1, Val(8)))
+
+    @assert_adapt isapprox(dx^2 + dy^2 + dz^2, 1; atol=F(1e-4)) "Ray direction not normalised, $(sqrt(dx^2 + dy^2 + dz^2)) for Ray with origin [$ox, $oy, $oz] and direction [$dx, $dy, $dz]"
 
     return Ray(Point(ox, oy, oz), Point(dx, dy, dz))
 end
@@ -323,6 +350,8 @@ end
 @inline @fastmath function find_scene_intersection(r, tmin::F, tmax::F)
     minHitT = tmax
     minIndex = Int32(0)
+
+    @assert_adapt isapprox(r.direction ⋅ r.direction, 1; atol=F(1e-4)) "Ray direction not normalised, $(norm(r.direction)) for Ray with origin [$(r.origin.x), $(r.origin.y), $(r.origin.z)] and direction [$(r.direction.x), $(r.direction.y), $(r.direction.z)]"
 
     assume(length(gpu_material_type()) >= 1)
     @loopinfo unrollcount=16 predicate for i in Int32(1):Int32(length(gpu_material_type()))
@@ -370,7 +399,9 @@ end
         position = r(hit_record.t)
         cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), hit_record.sphere_index, Val(16)))
         @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
-        @assert_adapt isapprox(norm2(normal), 1; atol=F(1e-2)) normal
+        @assert_adapt isapprox(norm2(normal), 1; atol=F(1e-2)) "normal not normalised $(norm(normal)) [$(normal.x), $(normal.y), $(normal.z)]"#; centre: [$cx, $cy, $cz], position: [$(position.x), $(position.y), $(position.z)], radius: $radius, ray.origin: [$(r.origin.x), $(r.origin.y), $(r.origin.z)], ray.direction: [$(r.direction.x), $(r.direction.y), $(r.direction.z)]"
+        normal = normalize_fast(normal)
+        @assert_adapt isapprox(norm2(normal), 1; atol=F(1e-4)) "normal not normalised $(norm(normal)) [$(normal.x), $(normal.y), $(normal.z)]"
 
         material_data = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_material_data())), hit_record.sphere_index, Val(16)))
         @inbounds material_type = gpu_material_type()[hit_record.sphere_index]
@@ -503,7 +534,17 @@ function undef_array(::Type{T}, sz; unwrap::F = StructArrays.alwaysfalse) where 
     if unwrap(T)
         return StructArrays.buildfromschema(typ -> undef_array(typ, sz; unwrap = unwrap), T)
     else
-        return CuArray{T}(undef, Int.(sz))
+        array = CuArray{T}(undef, Int.(sz))
+        # 0 initialising should make debugging easier
+        if T == Ray
+            fill!(array, Ray(zeros(Point), zeros(Point)))
+        elseif T == Tuple{Spectrum, UInt32}
+            fill!(array, (zeros(Spectrum), zero(UInt32)))
+        else
+            fill!(array, zero(T))
+        end
+
+        return array
     end
 end
 

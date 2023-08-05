@@ -3,6 +3,7 @@ macro smart_assert(ex, msg=nothing)
     return :($(esc(ex)))
 end
 const ASSERTIONS_DISABLED = true
+ASSERTIONS = :NONE
 include("../src/RayTracingInOneWeekend.jl")
 
 const SUITE = BenchmarkGroup()
