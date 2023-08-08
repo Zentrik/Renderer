@@ -18,32 +18,38 @@ if CUDA.functional()
     end
 
     macro assert_adapt(ex, msg...)
-        # return esc(:(@cuprint $(msg)))
-        # return :($(esc(ex)) ? $nothing : @cuprint("Assertion failed at line $($(__source__.line))\n", $msg) )
-
         return esc(:(
             $ex ? nothing : @cuprintln("Assertion failed at line $($(__source__.line))\n    ", $(msg...) ) 
         ))
-
-        # return :( $ex ? nothing : @cuprintln(("Assertion failed at line $($(__source__.line)): " * $(string(ex)))) )
     end
 else
     const var"@time_adapt" = var"@time"
     const var"@assert_adapt" = var"@smart_assert"
 end
 
-if !@isdefined(ASSERTIONS)
-    ASSERTIONS = :ALL
+macro inbounds(blk)
+    return Expr(:block,
+        Expr(:inbounds, true),
+        Expr(:local, Expr(:(=), :val, esc(blk))),
+        Expr(:inbounds, :pop),
+        :val)
 end
-if ASSERTIONS == :NONE
+
+const AssertionLevels = (None=0, No_Bounds_Checking=1, All=2)
+
+if !@isdefined(ASSERTIONS)
+    const ASSERTIONS::Int = AssertionLevels.All
+end
+
+if ASSERTIONS == AssertionLevels.None
     macro assert_adapt(ex, msg...)
         return nothing
     end
     macro assert_adapt(ex)
         return nothing
     end
-elseif ASSERTIONS == :NO_BOUNDS_CHECKING
-elseif ASSERTIONS == :ALL
+elseif ASSERTIONS == AssertionLevels.No_Bounds_Checking
+elseif ASSERTIONS == AssertionLevels.All
     macro inbounds(blk)
         return :($(esc(blk)))
     end
@@ -75,10 +81,13 @@ struct Ray
     origin::Point
     direction::Point
     
-    @fastmath function Ray(origin=zeros(Point), direction=Point(0, 1, 0))
-        @assert_adapt isapprox(direction ⋅ direction, 1; atol=F(1e-4)) "Ray direction not normalised, $(norm(direction)) for Ray with origin [$(origin.x), $(origin.y), $(origin.z)] and direction [$(direction.x), $(direction.y), $(direction.z)]"
+    @fastmath function Ray(origin=zeros(Point), direction=Point(0, 1, 0); unsafe=false)
+        if !unsafe
+            @assert_adapt isapprox(direction ⋅ direction, 1; atol=F(1e-4)) "Ray direction not normalised, $(norm(direction)) for Ray with origin [$(origin.x), $(origin.y), $(origin.z)] and direction [$(direction.x), $(direction.y), $(direction.z)]"
+        end
         new(origin, direction)
     end
+
 end
 @inline (ray::Ray)(t) = ray.origin + t * ray.direction
 
@@ -356,17 +365,11 @@ end
     assume(length(gpu_material_type()) >= 1)
     @loopinfo unrollcount=16 predicate for i in Int32(1):Int32(length(gpu_material_type()))
         cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), i, Val(16)))
+        centre = Point(cx, cy, cz)
 
-        cox = cx - r.origin.x
-        coy = cy - r.origin.y
-        coz = cz - r.origin.z
-
-        neg_half_b = r.direction.x * cox + r.direction.y * coy 
-        neg_half_b += r.direction.z * coz
-
-        c = cox*cox + coy*coy 
-        c += coz*coz 
-        c -= radius*radius
+        co = centre - r.origin
+        neg_half_b = r.direction ⋅ co
+        c = norm2(co) - radius*radius
 
         quarter_discriminant = neg_half_b*neg_half_b - c
 
@@ -419,14 +422,14 @@ end
             direction, scatter_again = metal!(rng, r, normal, fuzz)
         end
 
-        # if scatter_again
+        if scatter_again
             attenuation = Spectrum(@view material.data[1:3])
 
-            new_attenuation = ifelse(scatter_again, current_state.attenuation .* attenuation, zeros(Spectrum))
+            new_attenuation = current_state.attenuation .* attenuation
 
             if current_state.depth == max_depth
                 atomic_add!(img, pixel_index, new_attenuation)
-            elseif scatter_again
+            else
                 old_index = CUDA.atomic_add!(pointer(next_state_index), 1i32)
 
                 unsafe_store_vectorized!(pointer(next_state.ray, old_index), Ray(position, direction))
@@ -434,7 +437,7 @@ end
                 unsafe_store_vectorized!(pointer(next_state.attenuation_and_pixel_index, old_index), (new_attenuation, pixel_index))
                 @inbounds next_state.depth[old_index] = current_state.depth + 1u32
             end
-        # end
+        end
     end
 
     return nothing
@@ -489,7 +492,7 @@ function intersect_and_scatter_kernel!(img, next_state, current_state, max_depth
 
         hit_record = find_scene_intersection(ray, tmin, tmax)
 
-        @inbounds attenuation, pixel_index = unsafe_load_vectorized(pointer(current_state.attenuation_and_pixel_index, i))
+        attenuation, pixel_index = unsafe_load_vectorized(pointer(current_state.attenuation_and_pixel_index, i))
         @inbounds depth = current_state.depth[i]
         rng = RNG(pixel_index * (i + number_of_rays_generated) + depth)
         state = BufferData(ray, attenuation, pixel_index, depth)
@@ -535,13 +538,14 @@ function undef_array(::Type{T}, sz; unwrap::F = StructArrays.alwaysfalse) where 
         return StructArrays.buildfromschema(typ -> undef_array(typ, sz; unwrap = unwrap), T)
     else
         array = CuArray{T}(undef, Int.(sz))
-        # 0 initialising should make debugging easier
-        if T == Ray
-            fill!(array, Ray(zeros(Point), zeros(Point)))
-        elseif T == Tuple{Spectrum, UInt32}
-            fill!(array, (zeros(Spectrum), zero(UInt32)))
-        else
-            fill!(array, zero(T))
+        if ASSERTIONS > AssertionLevels.None         # 0 initialising should make debugging easier
+            if T == Ray
+                fill!(array, Ray(zeros(Point), zeros(Point); unsafe=true))
+            elseif T == Tuple{Spectrum, UInt32}
+                fill!(array, (zeros(Spectrum), zero(UInt32)))
+            else
+                fill!(array, zero(T))
+            end
         end
 
         return array
