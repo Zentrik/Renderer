@@ -2,12 +2,8 @@
 
 My implementation of https://raytracing.github.io/books/RayTracingInOneWeekend.html in Julia.
 
-Install by cloning this package and install my fork of SIMD.jl by
-```julia
-] add https://github.com/Zentrik/SIMD.jl
-```
-Then open [RayTracingInOneWeekend.jl](src/RayTracingInOneWeekend.jl), install the other necessary packages and run.
-
+Install by cloning this repo, activating the package environment (i.e. `cd` to the root directory, open `julia` and `] activate .`) and then instantiate (`] instantiate`).
+Then open [RayTracingInOneWeekend.jl](src/RayTracingInOneWeekend.jl) and run.
 
 Delete the definition of `SIMD.any()` if your computer does not support avx (this may also give a speedup if you have avx512)
 
