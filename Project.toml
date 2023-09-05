@@ -1,12 +1,11 @@
+authors = ["zentrik <Zentrik@users.noreply.github.com>"]
 name = "Renderer"
 uuid = "b8c361e5-6066-47f6-8cea-2b1ff02ae542"
-authors = ["zentrik <Zentrik@users.noreply.github.com>"]
 version = "0.2.0"
 
 [deps]
 BenchmarkTools = "6e4b80f9-dd63-53aa-95a3-0cdb28fa8baf"
 CUDA = "052768ef-5323-5732-b1bb-66c8b64840ba"
-GPUCompiler = "61eb1bfa-7361-4325-ad38-22787b887f55"
 Images = "916415d5-f1e6-5110-898d-aaa5f9f070e0"
 LLVM = "929cbde3-209d-540e-8aea-75f648917ca0"
 LLVMLoopInfo = "8b046642-f1f6-4319-8d3c-209ddc03c586"
@@ -18,6 +17,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 
 [extras]
+CUDA_Runtime_jll = "76a88914-d11a-5bdc-97e0-2f5a05c973a2"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [targets]
