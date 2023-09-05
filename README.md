@@ -2,6 +2,8 @@
 
 My implementation of https://raytracing.github.io/books/RayTracingInOneWeekend.html in Julia.
 
+GPU only Version is currently here https://github.com/Zentrik/Renderer/tree/GPU-WaveFront 
+
 Install by cloning this repo, activating the package environment (i.e. `cd` to the root directory, open `julia` and `] activate .`) and then instantiate (`] instantiate`).
 Then open [RayTracingInOneWeekend.jl](src/RayTracingInOneWeekend.jl) and run.
 
