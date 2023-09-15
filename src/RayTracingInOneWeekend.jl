@@ -5,21 +5,23 @@ using Core: LLVMPtr
 using LLVM, LLVM.Interop
 import Base.@inbounds
 
+set_zero_subnormals(true)
+
 if CUDA.functional()
-    # CUDA.allowscalar(false)
+    CUDA.allowscalar(false)
     const var"@time_adapt" = CUDA.var"@time"
     # CUDA.math_mode!(CUDA.PEDANTIC_MATH)
     CUDA.math_mode!(CUDA.FAST_MATH; precision=:Float16)
 
     macro assert_adapt(ex)
         return esc(:(
-            $ex ? nothing : @cuprintln("Assertion failed at line $($(__source__.line))") 
+            $ex ? nothing : @cuprintln("Assertion failed at line $($(__source__.line))")
         ))
     end
 
     macro assert_adapt(ex, msg...)
         return esc(:(
-            $ex ? nothing : @cuprintln("Assertion failed at line $($(__source__.line))\n    ", $(msg...) ) 
+            $ex ? nothing : @cuprintln("Assertion failed at line $($(__source__.line))\n    ", $(msg...) )
         ))
     end
 else
@@ -80,7 +82,7 @@ StructArrays.createinstance(::Type{SVector{3, F}}, args...) = SVector{3, F}(args
 struct Ray
     origin::Point
     direction::Point
-    
+
     @fastmath function Ray(origin=zeros(Point), direction=Point(0, 1, 0); unsafe=false)
         if !unsafe
             @assert_adapt isapprox(direction ⋅ direction, 1; atol=F(1e-4)) "Ray direction not normalised, $(norm(direction)) for Ray with origin [$(origin.x), $(origin.y), $(origin.z)] and direction [$(direction.x), $(direction.y), $(direction.z)]"
@@ -108,11 +110,9 @@ function Sphere(centre, radius, material)
     Sphere(SVector{4, F}(centre..., radius), material)
 end
 
-# CUDA.@device_override inv(x::Float32) = ccall("extern __nv_frcp_rn", llvmcall, Cfloat, (Cfloat,), x)
-# CUDA.@device_override inv(x::Float32) = @asmcall("rcp.approx.ftz.f32 \$0, \$1;", "=f,f", Float32, Tuple{Float32}, x)
 @fastmath sphere_normal(centre, radius, position) = (position - centre) * inv(radius)
 
-@kwdef struct hittable_list{T}
+@kwdef struct HittableList{T}
     spheres::T = []
 end
 
@@ -138,7 +138,7 @@ function Camera(nx::Integer=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Poi
     u = normalize(w × up)
     v = w × u
 
-    right = u * camera_width / nx 
+    right = u * camera_width / nx
     down = v * camera_height / ny
 
     camera_centre = pinhole_location + w * focus_distance
@@ -199,12 +199,11 @@ end
 
 ### General Functions
 
-CUDA.@device_override @inline Base.FastMath.sqrt_fast(x::Float32) = @asmcall("sqrt.approx.ftz.f32 \$0, \$1;", "=f,f", Float32, Tuple{Float32}, x)
-@inline StaticArrays.dot(a::SVector{N, T}, b::SVector{N, T}) where {N,T<:Real} = StaticArrays._vecdot(StaticArrays.same_size(a, b), a, b, Base.FastMath.mul_fast)
+# @inline StaticArrays.dot(a::SVector{N, T}, b::SVector{N, T}) where {N,T<:Real} = StaticArrays._vecdot(StaticArrays.same_size(a, b), a, b, Base.FastMath.mul_fast)
 
 imagesize(height, aspectRatio) = (Int(height), round(Int, height / aspectRatio))
 
-@fastmath pixel_world_position(camera, index) = pixel_world_position(camera, index[1], index[2])
+pixel_world_position(camera, index) = pixel_world_position(camera, index[1], index[2])
 @fastmath pixel_world_position(camera, x, y) = camera.upper_left_corner + (y - 1) * camera.right + (x - 1) * camera.down
 
 @inline @fastmath norm2(x) = x ⋅ x
@@ -232,7 +231,7 @@ end
 @inline @fastmath function random_in_unit_sphere!(rng)
     z = rand_minustoplus!(rng, F)
     r = sqrt(max(0, 1 - z*z))
-    ϕ = 2 * π * rand!(rng, F)
+    ϕ = 2 * π * rand!(rng, F) # DO NOT USE 2π, doubles register count
     sinϕ, cosϕ = sincos(ϕ) # We want to call fast_sin, fast_cos on GPU, fast_sincos is much slower. fast_sinpi, fast_sincospi do not exist
     return Point(r * cosϕ, r * sinϕ, z) * cbrt(rand!(rng, F))
 end
@@ -272,7 +271,7 @@ end
 end
 
 @fastmath function glass!(rng, ray, n⃗, ior)
-    air_ior = 1
+    air_ior = 1f0 # inv(Int64) = Float64 which leads to type instability
 
     cosθ = - ray.direction ⋅ n⃗
     into = cosθ > 0
@@ -295,7 +294,7 @@ end
     end
 end
 
-@fastmath function lambertian!(rng, n⃗) 
+@fastmath function lambertian!(rng, n⃗)
     random = random_on_unit_sphere_surface!(rng) # voxel_tracer uses random_in_unit_sphere which is about 5% faster
     vector = n⃗ + random
 
@@ -303,53 +302,8 @@ end
         @assert_adapt isapprox(norm2(n⃗), 1; atol=F(1e-4)) "normal not normalised, $(norm(n⃗)) [$(n⃗.x), $(n⃗.y), $(n⃗.z)]"
         return n⃗ # n⃗ should be normalised already
     end
-    
+
     return normalize_fast(vector)
-end
-
-### Load/ Stores
-
-@inline function atomic_add!(img::AbstractArray{Spectrum}, pixel_index, attenuation)
-    @assert_adapt checkbounds(Bool, img, pixel_index)
-
-    CUDA.atomic_add!(LLVMPtr{Float32}(pointer(img, pixel_index)), attenuation[1])
-    CUDA.atomic_add!(LLVMPtr{Float32}(pointer(img, pixel_index)) + sizeof(Float32), attenuation[2])
-    CUDA.atomic_add!(LLVMPtr{Float32}(pointer(img, pixel_index)) + 2*sizeof(Float32), attenuation[3])
-end
-
-@inline function unsafe_cached_load_vectorized(base_ptr::LLVMPtr{Ray,CUDA.AS.Global}, i::Integer)
-    offset = i-one(i) # in elements
-    ptr = LLVMPtr{Float32}(base_ptr) + offset*convert(typeof(i), sizeof(Ray))
-
-    ox, oy = to_tup(unsafe_cached_load(LLVMPtr{Vec{2, F}}(ptr), 1, Val(8)))
-
-    ptr += 2*sizeof(Float32)
-    oz, dx = to_tup(unsafe_cached_load(LLVMPtr{Vec{2, F}}(ptr), 1, Val(8)))
-
-    ptr += 2*sizeof(Float32)
-    dy, dz = to_tup(unsafe_cached_load(LLVMPtr{Vec{2, F}}(ptr), 1, Val(8)))
-
-    @assert_adapt isapprox(dx^2 + dy^2 + dz^2, 1; atol=F(1e-4)) "Ray direction not normalised, $(sqrt(dx^2 + dy^2 + dz^2)) for Ray with origin [$ox, $oy, $oz] and direction [$dx, $dy, $dz]"
-
-    return Ray(Point(ox, oy, oz), Point(dx, dy, dz))
-end
-@inline function unsafe_load_vectorized(ptr::LLVMPtr{Tuple{Spectrum, UInt32},CUDA.AS.Global})
-    s1, s2, s3, pixel_index = to_tup(unsafe_load(LLVMPtr{Vec{4, F}}(ptr), 1, Val(16)))
-    return Spectrum(s1, s2, s3), reinterpret(UInt32, pixel_index)
-end
-
-@inline function unsafe_store_vectorized!(ptr::LLVMPtr{Ray,CUDA.AS.Global}, ray)
-    unsafe_store!(LLVMPtr{Vec{2, F}}(ptr), (ray.origin[1], ray.origin[2]), 1, Val(8))
-    unsafe_store!(LLVMPtr{Vec{2, F}}(ptr + 2*sizeof(Float32)), (ray.origin[3], ray.direction[1]), 1, Val(8))
-    unsafe_store!(LLVMPtr{Vec{2, F}}(ptr + 4*sizeof(Float32)), (ray.direction[2], ray.direction[3]), 1, Val(8))
-
-    return nothing
-end
-
-@inline function unsafe_store_vectorized!(ptr::LLVMPtr{Tuple{Spectrum, UInt32},CUDA.AS.Global}, attenuation_and_pixel_index)
-    unsafe_store!(LLVMPtr{Vec{4, F}}(ptr), (attenuation_and_pixel_index[1]..., reinterpret(Float32, UInt32(attenuation_and_pixel_index[end]))), 1, Val(16))
-
-    return nothing
 end
 
 ### Render Loop
