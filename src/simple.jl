@@ -74,7 +74,7 @@ function Camera(nx::Integer=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Poi
     u = normalize(w × up)
     v = w × u
 
-    right = u * camera_width / nx 
+    right = u * camera_width / nx
     down = v * camera_height / ny
 
     camera_centre = pinhole_location + w * focus_distance
@@ -108,7 +108,7 @@ function rand!(rng::RNG, ::Type{Float32}) # random float in [0, 1)
     rng.seed = pcg_hash(rng.seed)
     result = reinterpret(Float32, rng.seed & 0x007FFFFF | 0x3f800000) - 1f0
     # https://github.com/JuliaLang/julia/issues/44887
-    # return Float32(rng.seed >>> 8) * Float32(0x1.0p-24) 
+    # return Float32(rng.seed >>> 8) * Float32(0x1.0p-24)
 
     assume(result >= 0)
     return result
@@ -213,14 +213,14 @@ end
     end
 end
 
-@fastmath function lambertian!(rng, n⃗) 
+@fastmath function lambertian!(rng, n⃗)
     random = random_on_unit_sphere_surface!(rng)
     vector = n⃗ + random
 
     if sum(abs.(vector)) <= F(1e-2) # quick way to check if vector ≈ 0
         return n⃗ # n⃗ should be normalised already
     end
-    
+
     return normalize_fast(vector)
 end
 
@@ -284,7 +284,7 @@ end
 
         if quarter_discriminant > 0
             sqrtd = sqrt(quarter_discriminant)
-    
+
             root = neg_half_b - sqrtd
             root2 = neg_half_b + sqrtd
 
@@ -485,7 +485,7 @@ end
         # @show CUDA.memory(_generate_and_intersect_and_scatter_kernel!)
 
         number_of_rays_generated += current_state_size
-        
+
         current_state_size = CUDA.@allowscalar next_state_index[] - 1i32
         CUDA.@allowscalar next_state_index[] = 1i32
 
@@ -503,11 +503,11 @@ end
             _intersect_and_scatter_kernel!_threads = min(current_state_size, _intersect_and_scatter_kernel!_config.threads)
             _intersect_and_scatter_kernel!_blocks = cld(current_state_size, _intersect_and_scatter_kernel!_threads)
             _intersect_and_scatter_kernel!(img, next_state, current_state, UInt32(max_depth), next_state_index, current_state_size, tmin, tmax, number_of_rays_generated; threads=_intersect_and_scatter_kernel!_threads, blocks=_intersect_and_scatter_kernel!_blocks)
-            
+
             tmp = current_state;
             current_state = next_state;
             next_state = tmp;
-            
+
             current_state_size = CUDA.@allowscalar next_state_index[] - 1i32
             CUDA.@allowscalar next_state_index[] = 1i32
         end
@@ -534,8 +534,8 @@ function scene_random_spheres()
 		center = Point(a + 0.9*rand(), -(b + 0.9*rand()), 0.2)
 
 		# skip spheres too close?
-		if norm(center - Point(4, 0, 0.2)) < 0.9 continue end 
-			
+		if norm(center - Point(4, 0, 0.2)) < 0.9 continue end
+
 		if choose_mat < 4//5
 			# lambertian
 			albedo = rand(Spectrum) .* rand(Spectrum)
@@ -598,7 +598,7 @@ end
 using BenchmarkTools
 function benchmark(; print=false)
     spectrum_img, camera = setup()
-    
+
     display(@benchmark (CUDA.@sync render!($spectrum_img, $camera; samples_per_pixel=10)))
 
     # https://github.com/JuliaCI/BenchmarkTools.jl/issues/127
@@ -607,6 +607,6 @@ function benchmark(; print=false)
     if print
         rgb_img = spectrumToRGB(spectrum_img)
         rgb_img |> display
-    end 
+    end
     return nothing
 end
