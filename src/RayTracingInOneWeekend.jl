@@ -361,7 +361,7 @@ end
 
     assume(length(gpu_material_type()) >= 1)
     @loopinfo unrollcount=16 predicate for i in Int32(1):Int32(length(gpu_material_type()))
-        cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), i, Val(16)))
+        @inbounds cx, cy, cz, radius = to_tup(gpu_centre_radius()[i])
         centre = Point(cx, cy, cz)
 
         co = centre - r.origin
@@ -397,13 +397,13 @@ end
         atomic_add!(img, pixel_index, current_state.attenuation .* world_color(r))
     else
         position = r(hit_record.t)
-        cx, cy, cz, radius = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_centre_radius())), hit_record.sphere_index, Val(16)))
+        @inbounds cx, cy, cz, radius = to_tup(gpu_centre_radius()[hit_record.sphere_index])
         @inline normal = sphere_normal(Point(cx, cy, cz), radius, position)
         @assert_adapt isapprox(norm2(normal), 1; atol=F(1e-2)) "normal not normalised $(norm(normal)) [$(normal.x), $(normal.y), $(normal.z)]"#; centre: [$cx, $cy, $cz], position: [$(position.x), $(position.y), $(position.z)], radius: $radius, ray.origin: [$(r.origin.x), $(r.origin.y), $(r.origin.z)], ray.direction: [$(r.direction.x), $(r.direction.y), $(r.direction.z)]"
         normal = normalize_fast(normal)
         @assert_adapt isapprox(norm2(normal), 1; atol=F(1e-4)) "normal not normalised $(norm(normal)) [$(normal.x), $(normal.y), $(normal.z)]"
 
-        material_data = to_tup(unsafe_cached_load(LLVMPtr{Vec{4, F}}(pointer(gpu_material_data())), hit_record.sphere_index, Val(16)))
+        @inbounds material_data = to_tup(gpu_material_data()[hit_record.sphere_index])
         @inbounds material_type = gpu_material_type()[hit_record.sphere_index]
         material = Material(material_type, material_data)
 
@@ -672,18 +672,20 @@ function scene_random_spheres()
 	push!(hittablelist, Sphere([-4,0,1], 1, Lambertian(Spectrum(0.4, 0.2, 0.1))))
 	push!(hittablelist, Sphere([4,0,1], 1, Metal(Spectrum(0.7, 0.6, 0.5), 0)))
 
-    scene = StructArray(hittablelist, unwrap=T->T==Material)
+    return scene = StructArray(hittablelist, unwrap=T->T==Material)
 
     const_memory = (centre_radius=stack(scene.centre_radius), material_type=scene.material.type, material_data=stack(scene.material.data))
 
     if !@isdefined(gpu_centre_radius)
-        for var in [:centre_radius, :material_type, :material_data]
+        for var in (:centre_radius, :material_type, :material_data)
             val = getfield(const_memory, var) |> vec
             gpu_var = Symbol("gpu_$var")
-            arr_typ = :(CuDeviceArray{$(eltype(val)),$(ndims(val)),CUDA.AS.Constant})
+            el_typ = var == :material_type ? eltype(val) : Vec{4, F}
+            arr_typ = :(CuDeviceArray{$el_typ, $(ndims(val)), CUDA.AS.Constant})
             @eval @inline @generated function $gpu_var()
                 ptr = CUDA.emit_constant_array($(QuoteNode(var)), $val)
-                Expr(:call, $arr_typ, ptr, $(size(val)))
+                ptr_converted = Expr(:call, :reinterpret, LLVMPtr{$el_typ, CUDA.AS.Constant}, ptr)
+                Expr(:call, $arr_typ, ptr_converted, $(size(val)))
             end
         end
     end
@@ -700,9 +702,9 @@ function setup(parallel, resolution=1920/4, aspect_ratio=16//9)
     spectrum_img = zeros(Spectrum, reverse(imagesize(resolution, aspect_ratio))...)
     camera = Camera(reverse(size(spectrum_img))..., [13, -3, 2], [0, 0, 0], [0, 0, 1], 20, 0.05, 10)
 
-    spectrum_img = CuArray(spectrum_img)
+    spectrum_img_gpu = CuArray(spectrum_img)
 
-    return scene, spectrum_img, camera
+    return scene, spectrum_img_gpu, camera
 end
 
 function production(parallel=:GPU)
