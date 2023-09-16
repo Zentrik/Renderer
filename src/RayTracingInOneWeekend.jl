@@ -672,7 +672,7 @@ function scene_random_spheres()
 	push!(hittablelist, Sphere([-4,0,1], 1, Lambertian(Spectrum(0.4, 0.2, 0.1))))
 	push!(hittablelist, Sphere([4,0,1], 1, Metal(Spectrum(0.7, 0.6, 0.5), 0)))
 
-    return scene = StructArray(hittablelist, unwrap=T->T==Material)
+    scene = StructArray(hittablelist, unwrap=T->T==Material)
 
     const_memory = (centre_radius=stack(scene.centre_radius), material_type=scene.material.type, material_data=stack(scene.material.data))
 
