@@ -197,6 +197,8 @@ function rand_minustoplus!(rng::RNG, ::Type{Float32}) # random float in [-1, 1)
     return reinterpret(Float32, rng.seed & 0x007FFFFF | 0x40000000) - 3f0
 end
 
+rand!(rng::RNG, ::Type{Spectrum}) = Spectrum(rand!(rng, F), rand!(rng, F), rand!(rng, F))
+
 ### General Functions
 
 # @inline StaticArrays.dot(a::SVector{N, T}, b::SVector{N, T}) where {N,T<:Real} = StaticArrays._vecdot(StaticArrays.same_size(a, b), a, b, Base.FastMath.mul_fast)
@@ -643,24 +645,24 @@ end
 ### Scene Setup
 
 function scene_random_spheres()
-    Random.seed!(1324)
+    rng = RNG(0)
     hittablelist = [Sphere([0, 0, -1000], 1000, Lambertian(Spectrum(.5, .5, .5)))]
 
 	for a in -11:10, b in -11:10
-		choose_mat = rand()
-		center = Point(a + 0.9*rand(), -(b + 0.9*rand()), 0.2)
+		choose_mat = rand!(rng, F)
+		center = Point(a + 0.9*rand!(rng, F), -(b + 0.9*rand!(rng, F)), 0.2)
 
 		# skip spheres too close?
 		if norm(center - Point(4, 0, 0.2)) < 0.9 continue end
 
 		if choose_mat < 4//5
 			# lambertian
-			albedo = rand(Spectrum) .* rand(Spectrum)
+			albedo = rand!(rng, Spectrum) .* rand!(rng, Spectrum)
 			push!(hittablelist, Sphere(center, 1//5, Lambertian(albedo)))
 		elseif choose_mat < 95//100
 			# metal
-			albedo = rand(Spectrum) / 2f0 .+ 0.5f0
-			fuzz = rand() / 2
+			albedo = rand!(rng, Spectrum) / 2f0 .+ 0.5f0
+			fuzz = rand!(rng, F) / 2
 			push!(hittablelist, Sphere(center, 0.2, Metal(albedo, fuzz)))
 		else
 			# glass
@@ -676,17 +678,15 @@ function scene_random_spheres()
 
     const_memory = (centre_radius=stack(scene.centre_radius), material_type=scene.material.type, material_data=stack(scene.material.data))
 
-    if !@isdefined(gpu_centre_radius)
-        for var in (:centre_radius, :material_type, :material_data)
-            val = getfield(const_memory, var) |> vec
-            gpu_var = Symbol("gpu_$var")
-            el_typ = var == :material_type ? eltype(val) : Vec{4, F}
-            arr_typ = :(CuDeviceArray{$el_typ, $(ndims(val)), CUDA.AS.Constant})
-            @eval @inline @generated function $gpu_var()
-                ptr = CUDA.emit_constant_array($(QuoteNode(var)), $val)
-                ptr_converted = Expr(:call, :reinterpret, LLVMPtr{$el_typ, CUDA.AS.Constant}, ptr)
-                Expr(:call, $arr_typ, ptr_converted, $(size(val)))
-            end
+    for var in (:centre_radius, :material_type, :material_data)
+        val = getfield(const_memory, var) |> vec
+        gpu_var = Symbol("gpu_$var")
+        el_typ = var == :material_type ? eltype(val) : Vec{4, F}
+        arr_typ = :(CuDeviceArray{$el_typ, $(ndims(val)), CUDA.AS.Constant})
+        @eval @inline @generated function $gpu_var()
+            ptr = CUDA.emit_constant_array($(QuoteNode(var)), $val)
+            ptr_converted = Expr(:call, :reinterpret, LLVMPtr{$el_typ, CUDA.AS.Constant}, ptr)
+            Expr(:call, $arr_typ, ptr_converted, $(size(val)))
         end
     end
 
@@ -708,7 +708,7 @@ function setup(parallel, resolution=1920/4, aspect_ratio=16//9)
 end
 
 function production(parallel=:GPU)
-    scene, spectrum_img, camera = setup(parallel)
+    scene, spectrum_img, camera = setup(parallel, 1920)
 
     @time_adapt render!(spectrum_img, scene, camera; samples_per_pixel=10, parallel=parallel)
     return spectrumToRGB(spectrum_img)
