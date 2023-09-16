@@ -660,7 +660,7 @@ function scene_random_spheres()
 		elseif choose_mat < 95//100
 			# metal
 			albedo = rand(Spectrum) / 2f0 .+ 0.5f0
-			fuzz = rand() * 5
+			fuzz = rand() / 2
 			push!(hittablelist, Sphere(center, 0.2, Metal(albedo, fuzz)))
 		else
 			# glass
