@@ -45,14 +45,9 @@ vec3 dielectric(ray r_in, vec3 normal, float ior, RNG& rng) {
     float sinTheta = sqrt(1 - cosTheta*cosTheta);
     bool into = cosTheta > 0;
 
-    float ior_ratio;
-    if (into) {
-        ior_ratio = air_ior / ior;
-    } else {
-        ior_ratio = ior / air_ior;
-        normal *= -1;
-        cosTheta *= -1;
-    }
+    float ior_ratio = into ? air_ior / ior : ior / air_ior;
+    normal *= into ? 1 : -1;
+    cosTheta *= into ? 1 : -1;
 
     bool cannot_refract = (ior_ratio * sinTheta) > 1;
 

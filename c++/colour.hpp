@@ -4,7 +4,7 @@
 #include <iostream>
 
 void write_colour(std::ofstream& out, colour pixel_colour, int samples_per_pixel) {
-    float scale = 1.f / samples_per_pixel;
+    float scale = 1.f / (float)samples_per_pixel;
 
     float r = powf32(pixel_colour.x * scale, .5);
     float g = powf32(pixel_colour.y * scale, .5);

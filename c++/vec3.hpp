@@ -3,17 +3,13 @@
 #include <cmath>
 #include <iostream>
 
-#ifndef _MSC_VER
-#include <boost/stacktrace.hpp>
-#endif
-
 class RNG;
 float random_float32(RNG& rng);
 float random_float32_minustoplus(RNG& rng);
 
 using std::sqrt;
 
-class vec3{
+class vec3 {
 public:
     union {
         float v[3];
@@ -78,8 +74,7 @@ public:
     }
 
     inline bool approx_zero() const {
-        const float absolute_tolerance = 1e-8;
-        return (fabs((*this)[0]) < absolute_tolerance) && (fabs((*this)[1]) < absolute_tolerance) && (fabs((*this)[2]) < absolute_tolerance);
+        return (abs(x) + abs(y) + abs(z)) < 1e-2f;
     }
 };
 

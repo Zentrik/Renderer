@@ -1,4 +1,4 @@
-// clang++-15 -std=c++20 c++/main.cpp -o c++/main -Wall -Ofast -ffast-math -fdenormal-fp-math=positive-zero -march=native -flto=full -ltbb
+// clang++-15 -std=c++20 c++/main.cpp -o c++/main -Wall -Wextra -Ofast -ffast-math -fdenormal-fp-math=positive-zero -march=native -flto=full -ltbb // -Wdouble-promotion -Wimplicit-int-float-conversion
 
 #include "settings.hpp"
 
@@ -11,7 +11,7 @@
 
 colour world_colour(ray r) {
     vec3 unit_direction = r.direction;
-    float t = 0.5 * (unit_direction.y + 1);
+    float t = 0.5f * (unit_direction.y + 1);
     return (1 - t) * colour(1, 1, 1) + t * colour(0.5, 0.7, 1);
 }
 
@@ -48,15 +48,15 @@ HittableList random_scene() {
     for (int a = -11; a < 11; a++) {
         for (int b = -11; b < 11; b++) {
             float choose_mat = random_float32(rng);
-            point3 center(a + 0.9 * random_float32(rng), 0.2, b + 0.9 * random_float32(rng));
+            point3 center(a + 0.9f * random_float32(rng), 0.2, b + 0.9f * random_float32(rng));
 
-            if (length(center - point3(4, 0.2, 0)) > 0.9) {
-                if (choose_mat < 0.8) {
+            if (length(center - point3(4, 0.2, 0)) > 0.9f) {
+                if (choose_mat < 0.8f) {
                     // diffuse
                     colour albedo = colour::random(rng) * colour::random(rng);
                     world.add(Sphere(center, 0.2, Material::Lambertian(albedo)));
                 }
-                else if (choose_mat < 0.95) {
+                else if (choose_mat < 0.95f) {
                     // metal
                     colour albedo = colour::random(rng) / 2 + vec3(.5);
                     float fuzz = random_float32(rng) / 2;
@@ -152,13 +152,13 @@ int main() {
     std::for_each(std::execution::par, jIterator.begin(), jIterator.end(),
         [&](int j)
         {
-            std::cout << "\rScanlines remaining: " << j << " " << std::flush;;
+            // std::cout << "\rScanlines remaining: " << j << " " << std::flush;;
             for (int i = 0; i < image_width; ++i) {
                 colour& pixel_colour = pixel[j][i];
 
                 for (int s = 0; s < samples_per_pixel; ++s) {
-                    float u = float(i + random_float32(rng)) / (image_width - 1);
-                    float v = float(j + random_float32(rng)) / (image_height - 1);
+                    float u = ((float)i + random_float32(rng)) / (image_width - 1);
+                    float v = ((float)j + random_float32(rng)) / (image_height - 1);
 
                     ray r = cam.get_ray(u, v, rng);
 
