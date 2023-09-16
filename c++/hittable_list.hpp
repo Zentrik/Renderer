@@ -1,6 +1,7 @@
 #pragma once
 
-#include "hittable.hpp"
+#include "header.hpp"
+#include "ray.hpp"
 #include "sphere.hpp"
 #include "material.hpp"
 
@@ -8,7 +9,14 @@
 
 #include <vector>
 
-class hittable_list : public hittable
+struct HitRecord {
+    float t;
+    vec3 p;
+    vec3 normal;
+    Material mat;
+};
+
+class HittableList
 {
 public:
     std::vector<Vec8f> centreX;
@@ -17,49 +25,49 @@ public:
 
     std::vector<Vec8f> radius;
 
-    std::vector<material*> mat_ptr;
+    std::vector<Material> mat;
 
-    hittable_list() {}
-    hittable_list(const sphere &object) { add(object); }
+    HittableList() {}
+    HittableList(const Sphere &object) { add(object); }
 
-    void add(const sphere &object)
+    void add(const Sphere &object)
     {
-        mat_ptr.push_back(object.mat_ptr);
+        mat.push_back(object.mat);
 
         if (radius.empty() || radius.back()[Vec8f::size() - 1] != 0)
         {
-            centreX.push_back(Vec8f(object.centre.x(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
-            centreY.push_back(Vec8f(object.centre.y(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
-            centreZ.push_back(Vec8f(object.centre.z(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
-            radius.push_back(Vec8f(object.radius, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f));
+            centreX.push_back(Vec8f(object.centre.x, 0, 0, 0, 0, 0, 0, 0));
+            centreY.push_back(Vec8f(object.centre.y, 0, 0, 0, 0, 0, 0, 0));
+            centreZ.push_back(Vec8f(object.centre.z, 0, 0, 0, 0, 0, 0, 0));
+            radius.push_back(Vec8f(object.radius, 0, 0, 0, 0, 0, 0, 0));
         }
         else
         {
             int i = horizontal_find_first(radius.back() == Vec8f(0.0f));
 
-            centreX.back().insert(i, object.centre.x());
-            centreY.back().insert(i, object.centre.y());
-            centreZ.back().insert(i, object.centre.z());
+            centreX.back().insert(i, object.centre.x);
+            centreY.back().insert(i, object.centre.y);
+            centreZ.back().insert(i, object.centre.z);
             radius.back().insert(i, object.radius);
         }
     }
 
-    virtual bool hit(const ray &r, float t_min, float t_max, hit_record &rec) const
+    bool hit(const ray &r, float t_min, float t_max, HitRecord &rec) const
     {
         bool hit_anything = false;
 #if _MSC_VER // For some reason speeds up msvc
-        hit_record temp_rec;
+        HitRecord temp_rec;
         rec = temp_rec;
 #endif
         Vec8f hitT(t_max);
         Vec8ui id;
 
-        Vec8f rOrigX(r.origin().x());
-        Vec8f rOrigY(r.origin().y());
-        Vec8f rOrigZ(r.origin().z());
-        Vec8f rDirX(r.direction().x());
-        Vec8f rDirY(r.direction().y());
-        Vec8f rDirZ(r.direction().z());
+        Vec8f rOrigX(r.origin.x);
+        Vec8f rOrigY(r.origin.y);
+        Vec8f rOrigZ(r.origin.z);
+        Vec8f rDirX(r.direction.x);
+        Vec8f rDirY(r.direction.y);
+        Vec8f rDirZ(r.direction.z);
 
         Vec8f tMinVec(t_min);
         Vec8ui curId(0, 1, 2, 3, 4, 5, 6, 7);
@@ -110,7 +118,7 @@ public:
             rec.t = finalHitT;
             rec.p = r.at(rec.t);
             rec.normal = (rec.p - vec3(centreX[i][j], centreY[i][j], centreZ[i][j])) / radius[i][j];
-            rec.mat_ptr = mat_ptr[hitId];
+            rec.mat = mat[hitId];
         }
 
         return hit_anything;

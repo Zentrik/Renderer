@@ -18,7 +18,7 @@
 
 // Usings
 
-using std::sqrt;
+using std::pow, std::sqrt, std::pair, std::bit_cast, std::max, std::min, std::clamp;
 
 using Clock = std::chrono::steady_clock;
 using std::chrono::time_point;
@@ -37,63 +37,37 @@ constexpr const float pi = 3.1415926535897932385;
 // Utility Functions
 
 constexpr inline float degrees_to_radians(float degrees) {
-    return degrees * pi / 180.0;
+    return degrees * pi / 180;
 }
 
-struct random_series {
-    uint32_t State;
+class RNG {
+public:
+    uint32_t seed;
 
-    random_series() = delete; // prevent it being initialised with 0
+    RNG(uint32_t seed) : seed(seed) {}
+    RNG() = delete; // prevent it being default initialised
 };
 
-uint32_t XOrShift32(random_series& Series) {
-    uint32_t x = Series.State;
-
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-
-    Series.State = x;
-    return x;
+uint32_t pcg_hash(uint32_t seed)
+{
+    uint32_t state = seed * 747796405u + 2891336453u;
+    uint32_t word = ((state >> (((state >> 28u) + 4u))) ^ state) * 277803737u;
+    return (word >> 22u) ^ word;
 }
 
-// struct random_series {
-//     uint64_t state;
-//     const uint64_t inc;
-
-//     // random_series() = delete; // prevent it being initialised with 0
-//     random_series() : state{1 + rand()}, inc{1 + rand()} {};
-//     random_series(uint64_t state, uint64_t inc) : state{state}, inc{inc} {};
-// };
-
-// uint32_t pcg_xsh_rs(random_series& Series)
-// {
-//     uint64_t oldstate = Series.state;
-//     // Advance internal state
-//     Series.state = oldstate * 6364136223846793005ULL + (Series.inc|1);
-//     // Calculate output function (XSH RR), uses old state for max ILP
-//     uint32_t xorshifted = ((oldstate >> 18u) ^ oldstate) >> 27u;
-//     uint32_t rot = oldstate >> 59u;
-//     return (xorshifted >> rot) | (xorshifted << ((-rot) & 31));
-// }
-
-inline float random_float(random_series &Series) {
-    // Returns a random real in [0,1).
-
-    float result = (float) XOrShift32(Series) / (float) ((uint32_t) - 1);
-    return result;
+uint32_t random_uint32(RNG& rng) {
+    rng.seed = pcg_hash(rng.seed);
+    return rng.seed;
 }
 
-inline float random_float(random_series &Series, float min, float max) {
-    // Returns a random real in [min,max).
-
-    return min + (max-min)*random_float(Series);
+// Returns a random real in [0,1).
+inline float random_float32(RNG& rng) {
+    return bit_cast<float>((random_uint32(rng) & 0x007FFFFF) | 0x3f800000) - 1;
 }
 
-inline float clamp(float x, float min, float max) {
-    if (x < min) return min;
-    if (x > max) return max;
-    return x;
+// random float in [-1, 1)
+float random_float32_minustoplus(RNG& rng) {
+    return bit_cast<float>((random_uint32(rng) & 0x007FFFFF) | 0x40000000) - 3;
 }
 
 // Common Headers

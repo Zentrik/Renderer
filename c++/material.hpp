@@ -2,112 +2,93 @@
 
 #include "header.hpp"
 
-struct hit_record;
+vec3 lambertian(vec3 normal, RNG& rng) {
+    vec3 scatter_direction = normal + uniform_random_unit_vector(rng);
 
-class material {
-    public:
-        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered, random_series &Series) const = 0;
+    if (scatter_direction.approx_zero()) {
+        scatter_direction = normal;
+    }
 
-        virtual ~material() {}
-};
-
-class lambertian: public material {
-    public:
-        colour albedo;
-
-        lambertian(const colour& a) : albedo(a) {}
-
-        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered, random_series &Series) const override {
-            vec3 scatter_direction = rec.normal + uniform_random_unit_vector(Series);
-
-            if (scatter_direction.approx_zero()) {
-                scatter_direction = rec.normal;
-            }
-
-            scattered = ray(rec.p, scatter_direction);
-            attenuation = albedo;
-            return true;
-        }
-
-    virtual ~lambertian() {}
-};
-
-vec3 reflect(const vec3& v, const vec3& n) {
-    return v - 2*dot(v,n)*n;
+    return normalised(scatter_direction);
 }
 
-class metal: public material {
-    public:
-        colour albedo;
-        float fuzz;
+vec3 reflect(vec3 v, vec3 n, RNG& rng, float fuzz=0) {
+    vec3 direction = v - 2*dot(v,n) * n;
+    if (fuzz != 0) {direction += fuzz * uniform_random_in_unit_sphere(rng);}
 
-        metal(const colour& a, float fuzz) : albedo(a), fuzz(fuzz < 1 ? fuzz : 1) {}
+    return normalised(direction);
+}
 
-        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered, random_series &Series) const override {
-            vec3 reflected = reflect(normalised(r_in.direction()), rec.normal);
-            scattered = ray(rec.p, reflected + fuzz * uniform_random_in_unit_sphere(Series));
-            attenuation = albedo;
+pair<vec3, bool> metal(ray r_in, vec3 normal, float fuzz, RNG& rng) {
+    vec3 scattered = reflect(r_in.direction, normal, rng, fuzz);
 
-            return dot(scattered.direction(), rec.normal) > 0;
-        }
-
-        virtual ~metal() {}
-};
+    return {scattered, dot(scattered, normal) > 0};
+}
 
 float schlick(float cosTheta, float ior_ratio) {
     // Use Schlick's approximation for reflectance.
     float r0 = (1 - ior_ratio) / (1 + ior_ratio);
     r0 *= r0;
-    return r0 + (1 - r0) * std::pow(1 - cosTheta, 5);
+    return r0 + (1 - r0) * pow(1 - cosTheta, 5.f);
 }
 
 vec3 refract(vec3 unit_direction, vec3 normal, float cosTheta, float ior_ratio) {
     vec3 r_out_perp =  ior_ratio * (unit_direction + cosTheta * normal);
-    vec3 r_out_parallel = -sqrt(fabs(1.0 - length_squared(r_out_perp))) * normal;
-    return r_out_perp + r_out_parallel;
+    vec3 r_out_parallel = -sqrt(max(0.f, 1 - length_squared(r_out_perp))) * normal;
+    return normalised(r_out_perp + r_out_parallel);
 }
 
-class dielectric : public material {
-    public:
-        float ior;
+vec3 dielectric(ray r_in, vec3 normal, float ior, RNG& rng) {
+    float air_ior = 1;
 
-        dielectric(float index_of_refraction) : ior(index_of_refraction) {}
+    float cosTheta = min(-dot(r_in.direction, normal), 1.f);
+    float sinTheta = sqrt(1 - cosTheta*cosTheta);
+    bool into = cosTheta > 0;
 
-        virtual bool scatter(const ray& r_in, const hit_record& rec, colour& attenuation, ray& scattered, random_series &Series) const override {
-            attenuation = colour(1.0, 1.0, 1.0);
+    float ior_ratio;
+    if (into) {
+        ior_ratio = air_ior / ior;
+    } else {
+        ior_ratio = ior / air_ior;
+        normal *= -1;
+        cosTheta *= -1;
+    }
 
-            float air_ior = 1.0;
+    bool cannot_refract = (ior_ratio * sinTheta) > 1;
 
-            vec3 unit_direction = normalised(r_in.direction());
-            float cosTheta = fmin(-dot(unit_direction, rec.normal), 1.0);
-            float sinTheta = sqrt(1 - cosTheta*cosTheta);
-            bool into = cosTheta > 0;
+    if (cannot_refract || random_float32(rng) < schlick(cosTheta, ior_ratio)) {
+        return reflect(r_in.direction, normal, rng);
+    } else {
+        return refract(r_in.direction, normal, cosTheta, ior_ratio);
+    }
+}
 
-            float ior_ratio;
-            int sign = 1;
-        
-            if (into) {
-                ior_ratio = air_ior / ior;
-            } else {
-                ior_ratio = ior / air_ior;
-                sign = -1;
-                cosTheta *= -1;
-            }
+class Material {
+public:
+    colour albedo;
+    float data;
 
-            bool cannot_refract = ior_ratio * sinTheta > 1.0;
-            vec3 direction;
+    enum class MaterialType : uint32_t {Lambertian, Metal, Dielectric};
+    MaterialType material;
 
-            if (cannot_refract || random_float(Series) < schlick(cosTheta, ior_ratio)) {
-                direction = reflect(unit_direction, rec.normal * sign);
-                // direction = refract(unit_direction, rec.normal * sign, cosTheta, ior_ratio);
-            } else {
-                direction = refract(unit_direction, rec.normal * sign, cosTheta, ior_ratio);
-            }
+    static Material Lambertian(colour albedo=colour{1,1,1}) {return {albedo, 0, MaterialType::Lambertian};}
+    static Material Metal(colour albedo={1,1,1}, float fuzz=0) {return {albedo, fuzz, MaterialType::Metal};}
+    static Material Dielectric(colour albedo={1,1,1}, float ior=1.5) {return {albedo, ior, MaterialType::Dielectric};}
 
-            scattered = ray(rec.p, direction);
+    std::tuple<vec3, colour, bool> scatter(ray r_in, vec3 normal, RNG& rng) const {
+        bool scatter_again = true;
+        vec3 direction;
 
-            return true;
+        using enum MaterialType;
+        if (material == Lambertian) {
+            direction = lambertian(normal, rng);
+        } else if (material == Metal) {
+            std::tie(direction, scatter_again) = metal(r_in, normal, data, rng);
+        } else {
+            direction = dielectric(r_in, normal, data, rng);
         }
 
-        virtual ~dielectric() {}
+        return {direction, albedo, scatter_again};
+    }
+
 };

@@ -1,13 +1,13 @@
 #pragma once
 
-#include "hittable.hpp"
 #include "vec3.hpp"
-    
-class sphere {
-    public:
-        point3 centre;
-        float radius;
-        material* mat_ptr;
+#include "material.hpp"
 
-        sphere(point3 centre, float radius, material* m) : centre(centre), radius(radius), mat_ptr(m) {};
+class Sphere {
+public:
+    point3 centre;
+    float radius;
+    Material mat;
+
+    Sphere(point3 centre, float radius, Material mat) : centre(centre), radius(radius), mat(mat) {};
 };

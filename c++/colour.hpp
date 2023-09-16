@@ -4,33 +4,14 @@
 #include <iostream>
 
 void write_colour(std::ofstream& out, colour pixel_colour, int samples_per_pixel) {
-    auto scale = 1./samples_per_pixel;
+    float scale = 1.f / samples_per_pixel;
 
-    auto r = pow(pixel_colour.x() * scale, .5);
-    auto g = pow(pixel_colour.y() * scale, .5);
-    auto b = pow(pixel_colour.z() * scale, .5);  
-
-    // Write the translated [0,255] value of each color component.
-    out << static_cast<int>(256 * clamp(r, 0.0, 0.999)) << ' '
-        << static_cast<int>(256 * clamp(g, 0.0, 0.999)) << ' '
-        << static_cast<int>(256 * clamp(b, 0.0, 0.999)) << '\n';
-}
-
-void write_colour(std::ostream& out, colour pixel_colour, int samples_per_pixel) {
-    auto scale = 1. / samples_per_pixel;
-
-    auto r = pow(pixel_colour.x() * scale, .5);
-    auto g = pow(pixel_colour.y() * scale, .5);
-    auto b = pow(pixel_colour.z() * scale, .5);
+    float r = powf32(pixel_colour.x * scale, .5);
+    float g = powf32(pixel_colour.y * scale, .5);
+    float b = powf32(pixel_colour.z * scale, .5);
 
     // Write the translated [0,255] value of each color component.
-    out << static_cast<int>(256 * clamp(r, 0.0, 0.999)) << ' '
-        << static_cast<int>(256 * clamp(g, 0.0, 0.999)) << ' '
-        << static_cast<int>(256 * clamp(b, 0.0, 0.999)) << '\n';
+    out << clamp(static_cast<int>(256 * r), 0, 255) << ' '
+        << clamp(static_cast<int>(256 * g), 0, 255) << ' '
+        << clamp(static_cast<int>(256 * b), 0, 255) << '\n';
 }
-
-/*
-void write_colour(std::vector<colour>& pixel, colour pixel_colour, int samples_per_pixel) {
-    pixel.push_back(pixel_colour);
-}
-*/
