@@ -41,7 +41,7 @@ colour ray_colour(ray r, const HittableList& world, int depth, RNG& rng) {
 
 HittableList random_scene() {
     HittableList world;
-    RNG rng{1324};
+    RNG rng{0};
 
     world.add(Sphere(point3(0, -1000, 0), 1000, Material::Lambertian(colour(0.5, 0.5, 0.5))));
 
