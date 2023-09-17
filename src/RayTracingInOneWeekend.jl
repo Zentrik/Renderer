@@ -569,7 +569,6 @@ end
     if parallel == :GPU
         current_state = StructArrays.buildfromschema(typ -> undef_array(typ, (state_size,)), BufferData);
         next_state = StructArrays.buildfromschema(typ -> undef_array(typ, (state_size,)), BufferData);
-        data_for_scattering = CuArray{HitRecord}(undef, state_size)
 
         next_state_index = CuArray{Int32}([1])
 
@@ -632,7 +631,6 @@ end
         img ./= samples_per_pixel
 
         # https://github.com/JuliaCI/BenchmarkTools.jl/issues/127
-        CUDA.unsafe_free!(data_for_scattering)
         StructArrays.foreachfield(CUDA.unsafe_free!, current_state)
         StructArrays.foreachfield(CUDA.unsafe_free!, next_state)
     end
