@@ -3,7 +3,6 @@
 #include <limits>
 #include <cstdlib>
 #include <fstream>
-#include <chrono>
 #include <algorithm>
 // #include <cuda_runtime.h>
 #include "helper_cuda.h"
@@ -20,13 +19,6 @@
 // Usings
 
 using std::pow, std::sqrt, std::pair, std::max, std::min;
-
-using Clock = std::chrono::steady_clock;
-using std::chrono::time_point;
-using std::chrono::duration_cast;
-using std::chrono::milliseconds;
-using namespace std::literals::chrono_literals;
-// using std::this_thread::sleep_for;
 
 // Type Aliases
 
@@ -113,7 +105,7 @@ public:
 
     __host__ __device__ float2 uniform_random_in_unit_disk() {
         while (true) {
-            float2 p(f32_minustoplus(), f32_minustoplus());
+            float2 p = make_float2(f32_minustoplus(), f32_minustoplus());
             if (dot(p, p) < 1) return p;
         }
     }

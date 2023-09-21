@@ -4,6 +4,10 @@
 // cuda-gdb build
 // clang++-17 -std=c++20 main.cu -o main --cuda-gpu-arch=sm_61 -Wall -Wextra -lcudart_static -g
 
+// to get ptx
+// clang++-17 -std=c++20 main.cu --cuda-gpu-arch=sm_61 -Wall -Wextra -Ofast -ffast-math -flto=full -emit-llvm -S
+// llc-17 -mcpu=sm_61 -mattr=+ptx80 -march=nvptx64 main-cuda-nvptx64-nvidia-cuda-sm_61.bc -o main.ptx
+
 #include "settings.hpp"
 
 #include "header.hpp"
@@ -152,7 +156,7 @@ __device__ void scatter(colour* img, BufferDataVec next_state, BufferData curren
                 i32 old_index = atomicAdd(next_state_index, 1);
 
                 next_state.ray[old_index] = Ray(position, direction);
-                next_state.attenuation_and_pixel_index[old_index] = make_float4(new_attenuation, uint_as_float(pixel_index));
+                next_state.attenuation_and_pixel_index[old_index] = make_float4(new_attenuation, __uint_as_float(pixel_index));
                 next_state.depth[old_index] = current_state.depth + 1u;
             }
         }
