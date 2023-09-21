@@ -1,5 +1,5 @@
 // clang++-15 -std=c++20 c++/main.cpp -o c++/main -Wall -Wextra -Ofast -ffast-math -fdenormal-fp-math=positive-zero -march=native -flto=full -ltbb // -Wdouble-promotion -Wimplicit-int-float-conversion
-// clang++-17 -std=c++20 main.cu -o main --cuda-gpu-arch=sm_61 -Wall -Wextra -Ofast -ffast-math -fcuda-flush-denormals-to-zero -flto=full -lcudart_static -ldl -lrt -pthread // -Wdouble-promotion -Wimplicit-int-float-conversion
+// clang++-17 -std=c++20 main.cu -o main --cuda-gpu-arch=sm_61 -Wall -Wextra -Ofast -ffast-math -fcuda-flush-denormals-to-zero -flto=full -lcudart_static -ldl -lrt -pthread -Xcuda-ptxas -v // -Wdouble-promotion -Wimplicit-int-float-conversion
 
 // cuda-gdb build
 // clang++-17 -std=c++20 main.cu -o main --cuda-gpu-arch=sm_61 -Wall -Wextra -lcudart_static -g
