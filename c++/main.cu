@@ -1,11 +1,11 @@
 // clang++-15 -std=c++20 c++/main.cpp -o c++/main -Wall -Wextra -Ofast -ffast-math -fdenormal-fp-math=positive-zero -march=native -flto=full -ltbb // -Wdouble-promotion -Wimplicit-int-float-conversion
-// clang++-17 -std=c++20 main.cu -o main --cuda-gpu-arch=sm_61 -Wall -Wextra -Ofast -ffast-math -flto=full -lcudart_static -ldl -lrt -pthread // -Wdouble-promotion -Wimplicit-int-float-conversion
+// clang++-17 -std=c++20 main.cu -o main --cuda-gpu-arch=sm_61 -Wall -Wextra -Ofast -ffast-math -fcuda-flush-denormals-to-zero -flto=full -lcudart_static -ldl -lrt -pthread // -Wdouble-promotion -Wimplicit-int-float-conversion
 
 // cuda-gdb build
 // clang++-17 -std=c++20 main.cu -o main --cuda-gpu-arch=sm_61 -Wall -Wextra -lcudart_static -g
 
 // to get ptx
-// clang++-17 -std=c++20 main.cu --cuda-gpu-arch=sm_61 -Wall -Wextra -Ofast -ffast-math -flto=full -emit-llvm -S
+// clang++-17 -std=c++20 main.cu --cuda-gpu-arch=sm_61 -Wall -Wextra -Ofast -ffast-math -fcuda-flush-denormals-to-zero -flto=full -emit-llvm -S
 // llc-17 -mcpu=sm_61 -mattr=+ptx80 -march=nvptx64 main-cuda-nvptx64-nvidia-cuda-sm_61.bc -o main.ptx
 
 #include "settings.hpp"
@@ -60,28 +60,28 @@ HittableList random_scene() {
     HittableList spheres;
     RNG rng{0};
 
-    spheres.emplace_back(vec3(0, 0, -1000), 1000, Material::Lambertian(colour(0.5, 0.5, 0.5)));
+    spheres.emplace_back(vec3(0, 0, -1000), 1000, Material::Lambertian(colour(0.5f, 0.5f, 0.5f)));
 
     for (f32 a = -11; a < 11; a++) {
         for (f32 b = -11; b < 11; b++) {
             f32 choose_mat = rng.f32();
-            vec3 center(a + 0.9f * rng.f32(), -(b + 0.9f * rng.f32()), 0.2);
+            vec3 center(a + 0.9f * rng.f32(), -(b + 0.9f * rng.f32()), 0.2f);
 
-            if (length(center - vec3(4, 0, 0.2)) > 0.9f) {
+            if (length(center - vec3(4, 0, 0.2f)) > 0.9f) {
                 if (choose_mat < 0.8f) {
                     // diffuse
                     colour albedo = rng.colour()* rng.colour();
-                    spheres.emplace_back(center, 0.2, Material::Lambertian(albedo));
+                    spheres.emplace_back(center, 0.2f, Material::Lambertian(albedo));
                 }
                 else if (choose_mat < 0.95f) {
                     // metal
-                    colour albedo = rng.colour() / 2 + colour(.5, .5, .5);
+                    colour albedo = rng.colour() / 2 + colour(.5f, .5f, .5f);
                     f32 fuzz = rng.f32() / 2;
-                    spheres.emplace_back(center, 0.2, Material::Metal(albedo, fuzz));
+                    spheres.emplace_back(center, 0.2f, Material::Metal(albedo, fuzz));
                 }
                 else {
                     // glass
-                    spheres.emplace_back(center, 0.2, Material::Dielectric());
+                    spheres.emplace_back(center, 0.2f, Material::Dielectric());
                 }
             }
         }
@@ -89,9 +89,9 @@ HittableList random_scene() {
 
     spheres.emplace_back(vec3(0, 0, 1), 1.0, Material::Dielectric());
 
-    spheres.emplace_back(vec3(-4, 0, 1), 1.0, Material::Lambertian({0.4, 0.2, 0.1}));
+    spheres.emplace_back(vec3(-4, 0, 1), 1.0, Material::Lambertian({0.4f, 0.2f, 0.1f}));
 
-    spheres.emplace_back(vec3(4, 0, 1), 1.0, Material::Metal({0.7, 0.6, 0.5}, 0));
+    spheres.emplace_back(vec3(4, 0, 1), 1.0, Material::Metal({0.7f, 0.6f, 0.5f}, 0));
 
     return spheres;
 }
@@ -108,7 +108,7 @@ __global__ void generate_rays(BufferDataVec current_state, Camera camera, u32 co
         u32 y = img_linear_index / column_size;
         u32 x = img_linear_index % column_size;
 
-        RNG rng((1+img_linear_index) * ((1+i) + offset));
+        RNG rng((1u+img_linear_index) * ((1u+i) + offset));
         Ray ray = camera.get_ray((f32)x, (f32)y, rng);
 
         current_state.ray[i + index_offset] = ray;
@@ -176,7 +176,7 @@ __global__ void intersect_and_scatter(colour* img, BufferDataVec next_state, Buf
         u32 pixel_index = __float_as_uint(a_p.w);
 
         u32 depth = current_state.depth[i];
-        RNG rng((1+pixel_index) * ((1+i) + number_of_rays_generated) + depth);
+        RNG rng((1u+pixel_index) * ((1u+i) + number_of_rays_generated) + depth);
         BufferData state(ray, attenuation, pixel_index, depth);
         scatter(img, next_state, state, next_state_index, rng, hit_record, max_depth);
     }
@@ -191,7 +191,7 @@ __global__ void generate_intersect_and_scatter(colour* img, BufferDataVec next_s
         u32 y = img_linear_index / column_size;
         u32 x = img_linear_index % column_size;
 
-        RNG rng((1+img_linear_index) * ((i+1) + offset));
+        RNG rng((1u+img_linear_index) * ((i+1u) + offset));
         Ray ray = camera.get_ray((f32)x, (f32)y, rng);
         // printf("[%u, %u] \n", x, y);
         // printf("%u \n", img_linear_index);
