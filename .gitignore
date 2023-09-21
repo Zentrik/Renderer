@@ -10,7 +10,15 @@ in_one_weekend/target
 *.ptx
 *.sass
 
+*.ppm
 *.png
 !coalesced_memory*.png
 
 !intersect_and_scatter_kernel!_*.*
+
+c++/main*
+!c++/main.c*
+
+*.json
+*.data*
+*.tmp

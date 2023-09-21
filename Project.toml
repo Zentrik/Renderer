@@ -1,6 +1,6 @@
-authors = ["zentrik <Zentrik@users.noreply.github.com>"]
 name = "Renderer"
 uuid = "b8c361e5-6066-47f6-8cea-2b1ff02ae542"
+authors = ["zentrik <Zentrik@users.noreply.github.com>"]
 version = "0.2.0"
 
 [deps]

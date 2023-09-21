@@ -816,3 +816,17 @@ end
 # catch err
 #     code_typed(err, interactive=true)
 # end
+
+# function write_ppm(filename, img)
+#     open(filename, "w") do io
+#         println(io, "P3")
+#         println(io, size(img)[2], " ", size(img)[1])
+#         println(io, 255)
+#         for i in axes(img, 1)
+#             for j in axes(img, 2)
+#                 pixel = img[i, j] |> RGB{N0f8} |> x->reinterpret.((x.r, x.g, x.b)) .|> Int
+#                 println(io, pixel[1], " ", pixel[2], " ", pixel[3])
+#             end
+#         end
+#     end
+# end
