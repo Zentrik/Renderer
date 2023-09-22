@@ -71,6 +71,88 @@ public:
     }
 };
 
+void swap(BufferDataVec& x, BufferDataVec& y) {
+    std::swap(x.ray, y.ray);
+    std::swap(x.attenuation_and_pixel_index, y.attenuation_and_pixel_index);
+    std::swap(x.depth, y.depth);
+}
+
+template<typename T>
+class AtomicGPUFixedSizeVectorWrapper { // capacity set by ctor
+public:
+    T data;
+    i32* length;
+
+    // allocate uninitialised data, reserve T
+    __host__ AtomicGPUFixedSizeVectorWrapper(i32 size) : data(size) {
+        checkCudaErrors(cudaMalloc(&length, sizeof(i32)));
+        checkCudaErrors(cudaMemset(length, 0, sizeof(i32)));
+    }
+
+    __device__ void push_back(auto x) {
+        i32 index = atomicAdd(length, 1);
+        data[index] = x;
+    }
+
+    __device__ auto operator[](i32 i) const {
+        return data[i];
+    }
+
+    __device__ auto operator[](i32 i) {
+        return data[i];
+    }
+
+    void clear() {
+        checkCudaErrors(cudaMemset(length, 0, sizeof(i32)));
+    }
+
+    void free () {
+        // clean up
+        data.free();
+        checkCudaErrors(cudaGetLastError());
+        checkCudaErrors(cudaFree(length));
+    }
+};
+
+template<typename T>
+class GPUFixedSizeVectorWrapper { // capacity set by ctor
+public:
+    T data;
+    i32 length;
+
+    // allocate uninitialised data, reserve T
+    __host__ GPUFixedSizeVectorWrapper(i32 size) : data(size), length(0) {}
+
+    __device__ auto operator[](i32 i) const {
+        return data[i];
+    }
+
+    __device__ auto operator[](i32 i) {
+        return data[i];
+    }
+
+    __host__ __device__ i32 size() const {
+        return length;
+    }
+
+    bool empty() const {
+        return length == 0;
+    }
+
+    void free () {
+        // clean up
+        data.free();
+    }
+};
+
+template<typename T>
+void swap(GPUFixedSizeVectorWrapper<T>& x, AtomicGPUFixedSizeVectorWrapper<T>& y) {
+    swap(x.data, y.data);
+    int x_length = x.length;
+    checkCudaErrors(cudaMemcpy(&x.length, y.length, sizeof(i32), cudaMemcpyDeviceToHost));
+    checkCudaErrors(cudaMemset(y.length, x_length, sizeof(i32)));
+}
+
 __device__ colour world_colour(Ray ray) {
     f32 t = (ray.direction.z + 1) / 2.f;
     return (1.f - t) * colour(1, 1, 1) + t * colour(0.5, 0.7, 1);
@@ -116,10 +198,10 @@ HittableList random_scene() {
     return spheres;
 }
 
-__global__ void generate_rays(BufferDataVec current_state, Camera camera, u32 column_size, i32 current_state_size, u32 offset, u32 samples_per_pixel, i32 index_offset) {
+__global__ void generate_rays(GPUFixedSizeVectorWrapper<BufferDataVec> current_state, Camera camera, u32 column_size, i32 rays_to_generate, u32 offset, u32 samples_per_pixel) {
     i32 index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    for (i32 i = index; i < current_state_size; i += gridDim.x * blockDim.x) {
+    for (i32 i = index; i < rays_to_generate; i += gridDim.x * blockDim.x) {
         u32 img_linear_index = u32((i + offset) / samples_per_pixel);
 
         u32 y = img_linear_index / column_size;
@@ -128,13 +210,11 @@ __global__ void generate_rays(BufferDataVec current_state, Camera camera, u32 co
         RNG rng((1u+img_linear_index) * ((1u+i) + offset));
         Ray ray = camera.get_ray((f32)x, (f32)y, rng);
 
-        current_state.ray[i + index_offset] = ray;
-        current_state.attenuation_and_pixel_index[i + index_offset] = make_float4(1, 1, 1, __uint_as_float(img_linear_index));
-        current_state.depth[i + index_offset] = 1u;
+        current_state[i + current_state.size()] = BufferData(ray, colour(1, 1, 1), img_linear_index, 1u);
     }
 }
 
-__device__ void scatter(colour* img, BufferDataVec next_state, BufferData current_state, i32* next_state_index, RNG& rng, HitRecord hit_record, u32 max_depth) {
+__device__ void scatter(colour* img, AtomicGPUFixedSizeVectorWrapper<BufferDataVec> next_state, BufferData current_state, RNG& rng, HitRecord hit_record, u32 max_depth) {
     u32 pixel_index = current_state.pixel_index;
     Ray r = current_state.ray;
 
@@ -170,30 +250,28 @@ __device__ void scatter(colour* img, BufferDataVec next_state, BufferData curren
                 atomicAdd(&(img[pixel_index].y), new_attenuation.y);
                 atomicAdd(&(img[pixel_index].z), new_attenuation.z);
             } else {
-                i32 old_index = atomicAdd(next_state_index, 1);
-
-                next_state[old_index] = BufferData(Ray(position, direction), new_attenuation, pixel_index, current_state.depth + 1u);
+                next_state.push_back(BufferData(Ray(position, direction), new_attenuation, pixel_index, current_state.depth + 1u));
             }
         }
     }
 }
 
-__global__ void intersect_and_scatter(colour* img, BufferDataVec next_state, const BufferDataVec current_state, u32 max_depth, i32* next_state_index, i32 current_state_size, f32 tmin, f32 tmax, u32 number_of_rays_generated) {
+__global__ void intersect_and_scatter(colour* img, AtomicGPUFixedSizeVectorWrapper<BufferDataVec> next_state, const GPUFixedSizeVectorWrapper<BufferDataVec> current_state, u32 max_depth, f32 tmin, f32 tmax, u32 number_of_rays_generated) {
     i32 index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    for (i32 i = index; i < current_state_size; i += gridDim.x * blockDim.x) {
+    for (i32 i = index; i < current_state.size(); i += gridDim.x * blockDim.x) {
         BufferData state = current_state[i];
 
         HitRecord hit_record = hit(state.ray, tmin, tmax);
         RNG rng((1u + state.pixel_index) * ((1u + i) + number_of_rays_generated) + state.depth);
-        scatter(img, next_state, state, next_state_index, rng, hit_record, max_depth);
+        scatter(img, next_state, state, rng, hit_record, max_depth);
     }
 }
 
-__global__ void generate_intersect_and_scatter(colour* img, BufferDataVec next_state, u32 max_depth, i32* next_state_index, i32 rays_size, f32 tmin, f32 tmax, Camera camera, u32 offset, u32 samples_per_pixel, u32 column_size) {
+__global__ void generate_intersect_and_scatter(colour* img, AtomicGPUFixedSizeVectorWrapper<BufferDataVec> next_state, i32 next_state_capactity, u32 max_depth, f32 tmin, f32 tmax, Camera camera, u32 offset, u32 samples_per_pixel, u32 column_size) {
     i32 index = blockIdx.x * blockDim.x + threadIdx.x;
 
-    for (i32 i = index; i < rays_size; i += gridDim.x * blockDim.x) {
+    for (i32 i = index; i < next_state_capactity; i += gridDim.x * blockDim.x) {
         u32 img_linear_index = (i + offset) / samples_per_pixel;
 
         u32 y = img_linear_index / column_size;
@@ -209,7 +287,7 @@ __global__ void generate_intersect_and_scatter(colour* img, BufferDataVec next_s
 
         HitRecord hit_record = hit(ray, tmin, tmax);
         // printf("[%f, %u] \n", hit_record.t, hit_record.sphere_index);
-        scatter(img, next_state, current_state, next_state_index, rng, hit_record, max_depth);
+        scatter(img, next_state, current_state, rng, hit_record, max_depth);
     }
 }
 
@@ -289,43 +367,32 @@ i32 main() {
 
     // Render Loop Started
 
-    i32 number_of_rays = samples_per_pixel * image_height * image_width;
+    const i32 no_of_pixels = image_height * image_width;
+    const i32 number_of_rays = samples_per_pixel * no_of_pixels;
 
-    i32 max_state_size = pow(10, 7);
-    i32 state_size = min(number_of_rays, max_state_size);
+    const i32 max_state_size = pow(10, 7);
+    const i32 state_size = min(number_of_rays, max_state_size);
+    i32 number_of_rays_generated = 0;
 
-    BufferDataVec current_state(state_size);
-    BufferDataVec next_state(state_size);
-
-    u32 number_of_rays_generated = 0;
-
-    i32 current_state_size = min(number_of_rays - (i32)number_of_rays_generated, state_size);
-    i32* next_state_index;
-    checkCudaErrors(cudaMalloc(&next_state_index, sizeof(i32)));
-    checkCudaErrors(cudaMemset(next_state_index, 0, sizeof(i32)));
+    GPUFixedSizeVectorWrapper<BufferDataVec> current_state(state_size);
+    AtomicGPUFixedSizeVectorWrapper<BufferDataVec> next_state(state_size);
 
     int generate_intersect_and_scatter_blocks;
     int generate_intersect_and_scatter_threads;
 
     checkCudaErrors(cudaOccupancyMaxPotentialBlockSize(
-                &generate_intersect_and_scatter_blocks, &generate_intersect_and_scatter_threads, generate_intersect_and_scatter, 0, current_state_size));
+                &generate_intersect_and_scatter_blocks, &generate_intersect_and_scatter_threads, generate_intersect_and_scatter, 0, 0));
 
-    generate_intersect_and_scatter_threads = min(generate_intersect_and_scatter_threads, current_state_size);
-    generate_intersect_and_scatter_blocks = (current_state_size + generate_intersect_and_scatter_threads - 1) / generate_intersect_and_scatter_threads;
+    generate_intersect_and_scatter_threads = min(generate_intersect_and_scatter_threads, state_size);
+    generate_intersect_and_scatter_blocks = (state_size + generate_intersect_and_scatter_threads - 1) / generate_intersect_and_scatter_threads;
 
-    generate_intersect_and_scatter<<<generate_intersect_and_scatter_blocks, generate_intersect_and_scatter_threads>>>(d_img, current_state, max_depth, next_state_index, current_state_size, tmin, tmax, camera, number_of_rays_generated, samples_per_pixel, image_height);
+    generate_intersect_and_scatter<<<generate_intersect_and_scatter_blocks, generate_intersect_and_scatter_threads>>>(d_img, next_state, state_size, max_depth, tmin, tmax, camera, number_of_rays_generated, samples_per_pixel, image_height);
     checkCudaErrors(cudaGetLastError());
 
-    number_of_rays_generated += current_state_size;
+    number_of_rays_generated = state_size;
 
-    checkCudaErrors(cudaMemcpy(&current_state_size, next_state_index, sizeof(i32), cudaMemcpyDeviceToHost));
-    checkCudaErrors(cudaMemset(next_state_index, 0, sizeof(i32)));
-
-    int intersect_and_scatter_minGridSize;
-    int intersect_and_scatter_blockSize;
-
-    checkCudaErrors(cudaOccupancyMaxPotentialBlockSize(
-                &intersect_and_scatter_minGridSize, &intersect_and_scatter_blockSize, intersect_and_scatter, 0, current_state_size));
+    swap(current_state, next_state);
+    next_state.clear();
 
     int intersect_and_scatter_blocks;
     int intersect_and_scatter_threads;
@@ -339,33 +406,28 @@ i32 main() {
     checkCudaErrors(cudaOccupancyMaxPotentialBlockSize(
                 &generate_rays_blocks, &generate_rays_threads, generate_rays, 0, 0));
 
-    while (current_state_size > 0) {
-        i32 free_slots = min(number_of_rays - (i32)number_of_rays_generated, state_size - current_state_size);
+    while (!current_state.empty()) {
+        i32 rays_to_generate = min(number_of_rays - number_of_rays_generated, state_size - current_state.size());
 
-        if (free_slots > 0) {
-            generate_rays_threads = min(generate_rays_threads, current_state_size);
-            generate_rays_blocks = (current_state_size + generate_rays_threads - 1) / generate_rays_threads;
+        if (rays_to_generate > 0) {
+            generate_rays_threads = min(generate_rays_threads, rays_to_generate);
+            generate_rays_blocks = (rays_to_generate + generate_rays_threads - 1) / generate_rays_threads;
 
-            generate_rays<<<generate_rays_blocks, generate_rays_threads>>>(current_state, camera, image_height, free_slots, number_of_rays_generated, samples_per_pixel, current_state_size);
+            generate_rays<<<generate_rays_blocks, generate_rays_threads>>>(current_state, camera, image_height, rays_to_generate, number_of_rays_generated, samples_per_pixel);
             checkCudaErrors(cudaGetLastError());
 
-            number_of_rays_generated += free_slots;
-            current_state_size += free_slots;
+            number_of_rays_generated += rays_to_generate;
+            current_state.length += rays_to_generate;
         }
 
-        intersect_and_scatter_threads = min(intersect_and_scatter_threads, current_state_size);
-        intersect_and_scatter_blocks = (current_state_size + intersect_and_scatter_threads - 1) / intersect_and_scatter_threads;
+        intersect_and_scatter_threads = min(intersect_and_scatter_threads, current_state.size());
+        intersect_and_scatter_blocks = (current_state.size() + intersect_and_scatter_threads - 1) / intersect_and_scatter_threads;
 
-        intersect_and_scatter<<<intersect_and_scatter_blocks, intersect_and_scatter_threads>>>(d_img, next_state, current_state, max_depth, next_state_index, current_state_size, tmin, tmax, number_of_rays_generated);
+        intersect_and_scatter<<<intersect_and_scatter_blocks, intersect_and_scatter_threads>>>(d_img, next_state, current_state, max_depth, tmin, tmax, number_of_rays_generated);
         checkCudaErrors(cudaGetLastError());
 
-        // std::swap(current_state, d_next_state);
-        BufferDataVec tmp = current_state;
-        current_state = next_state;
-        next_state = tmp;
-
-        checkCudaErrors(cudaMemcpy(&current_state_size, next_state_index, sizeof(i32), cudaMemcpyDeviceToHost));
-        checkCudaErrors(cudaMemset(next_state_index, 0, sizeof(i32)));
+        swap(current_state, next_state);
+        next_state.clear();
     }
 
     // Render Loop Ended
@@ -375,8 +437,8 @@ i32 main() {
 
     std::cout << "\nDone in " << elapsedTime << " milliseconds\n";
 
-    colour* h_img = new colour[image_height * image_width];
-    checkCudaErrors(cudaMemcpy(h_img, d_img, image_height * image_width * sizeof(colour), cudaMemcpyDeviceToHost));
+    colour* h_img = new colour[no_of_pixels];
+    checkCudaErrors(cudaMemcpy(h_img, d_img, no_of_pixels * sizeof(colour), cudaMemcpyDeviceToHost));
 
     std::ofstream myfile;
     myfile.open("image.ppm");
@@ -393,7 +455,6 @@ i32 main() {
     checkCudaErrors(cudaDeviceSynchronize());
     checkCudaErrors(cudaGetLastError());
     checkCudaErrors(cudaFree(d_img));
-    checkCudaErrors(cudaFree(next_state_index));
 
     current_state.free();
     next_state.free();
