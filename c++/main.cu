@@ -100,11 +100,8 @@ __global__ void generate_rays(BufferDataVec current_state, Camera camera, u32 co
     i32 index = blockIdx.x * blockDim.x + threadIdx.x;
 
     for (i32 i = index; i < current_state_size; i += gridDim.x * blockDim.x) {
-        // __assume(samples_per_pixel > 0);
-        // __assume(i > 0);
         u32 img_linear_index = u32((i + offset) / samples_per_pixel);
 
-        // __assume(column_size > 0);
         u32 y = img_linear_index / column_size;
         u32 x = img_linear_index % column_size;
 
@@ -176,7 +173,7 @@ __global__ void intersect_and_scatter(colour* img, BufferDataVec next_state, Buf
         u32 pixel_index = __float_as_uint(a_p.w);
 
         u32 depth = current_state.depth[i];
-        RNG rng((1u+pixel_index) * ((1u+i) + number_of_rays_generated) + depth);
+        RNG rng((1u + pixel_index) * ((1u + i) + number_of_rays_generated) + depth);
         BufferData state(ray, attenuation, pixel_index, depth);
         scatter(img, next_state, state, next_state_index, rng, hit_record, max_depth);
     }
@@ -191,13 +188,13 @@ __global__ void generate_intersect_and_scatter(colour* img, BufferDataVec next_s
         u32 y = img_linear_index / column_size;
         u32 x = img_linear_index % column_size;
 
-        RNG rng((1u+img_linear_index) * ((i+1u) + offset));
+        RNG rng((1u + img_linear_index) * ((i + 1u) + offset));
         Ray ray = camera.get_ray((f32)x, (f32)y, rng);
         // printf("[%u, %u] \n", x, y);
         // printf("%u \n", img_linear_index);
         // printf("[%f, %f, %f] \n", ray.origin.x, ray.origin.y, ray.origin.z);
         // printf("[%f, %f, %f] \n", ray.direction.x, ray.direction.y, ray.direction.z);
-        BufferData current_state(ray, make_float3(1, 1, 1), img_linear_index, 1);
+        BufferData current_state(ray, colour(1, 1, 1), img_linear_index, 1);
 
         HitRecord hit_record = hit(ray, tmin, tmax);
         // printf("[%f, %u] \n", hit_record.t, hit_record.sphere_index);
