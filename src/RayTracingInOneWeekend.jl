@@ -3,8 +3,8 @@
 using Parameters, StaticArrays, LinearAlgebra, Images, SIMD, StructArrays, MLStyle, SmartAsserts
 using Expronicon.ADT: @adt
 
-# SmartAsserts.set_enabled(false)
-Fast = false
+SmartAsserts.set_enabled(false)
+Fast = true
 
 const F = Float32
 const N = 8 # vector width
