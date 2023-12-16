@@ -9,7 +9,7 @@ Fast = false
 const F = Float32
 const N = 8 # vector width
 
-const Point = SVector{3, F} # We use F so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be contructed carefully to ensure same types everywhere. (can we somehow promote it)
+const Point = SVector{3, F} # We use F so we dont have points of different types, otherwise Ray, Sphere become parametric types and HittableList needs to be constructed carefully to ensure same types everywhere. (can we somehow promote it)
 const Spectrum = SVector{3, F}
 
 @with_kw struct Ray @deftype Point
@@ -87,7 +87,7 @@ function Camera(nx::Integer=400, ny=imagesize(nx, 16/9)[2], pinhole_location=Poi
     u = normalize(w × up)
     v = w × u
 
-    right = u * camera_width / nx 
+    right = u * camera_width / nx
     down = v * camera_height / ny
 
     camera_centre = pinhole_location + w * focus_distance
@@ -106,7 +106,7 @@ end
 
 function world_color(ray)
     interp = (ray.direction.z + 1) / 2
-    return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0) # Spectrum{3, Float64} instead of Spectrum{3, F} saves 1mb, 0.2s for nx=50. 
+    return (1 - interp) * Spectrum(1, 1, 1) + interp * Spectrum(0.5, 0.7, 1.0) # Spectrum{3, Float64} instead of Spectrum{3, F} saves 1mb, 0.2s for nx=50.
 end
 
 @static if Fast
@@ -178,7 +178,7 @@ end
 
     sinθ = sqrt(max(1 - cosθ^2, zero(F)))
     @smart_assert !isnan(sinθ)
-    
+
     if into
         ior_ratio = air_ior / ior
     else
@@ -198,14 +198,14 @@ end
     end
 end
 
-@fastmath function lambertian(ray, n⃗) 
+@fastmath function lambertian(ray, n⃗)
     random = random_on_unit_sphere_surface()
     vector = n⃗ + random
 
     if all(vector .≈ 0)
         vector = n⃗
     end
-    
+
     direction = normalize_fast(vector)
     return direction
 end
@@ -239,7 +239,7 @@ end
     %3 = sext  <$N x i1> %2 to <$N x $t>
     ret <$N x $t> %3
     """
-    return :( 
+    return :(
         $(Expr(:meta,:inline));
         Vec(Base.llvmcall($s, SIMD.LVec{$N,$F}, Tuple{SIMD.LVec{$N,Bool}}, x.data))
     )
@@ -262,11 +262,11 @@ const initialRecord = hit_record(zeros(Point), normalize(ones(Point)), Sphere().
         coy = hittable_list.spheres.centre.y[lane] - r.origin.y
         coz = hittable_list.spheres.centre.z[lane] - r.origin.z
 
-        neg_half_b = r.direction.x * cox + r.direction.y * coy 
+        neg_half_b = r.direction.x * cox + r.direction.y * coy
         neg_half_b += r.direction.z * coz
 
-        c = cox*cox + coy*coy 
-        c += coz*coz 
+        c = cox*cox + coy*coy
+        c += coz*coz
         c -= hittable_list.spheres.radius[lane] * hittable_list.spheres.radius[lane]
 
         quarter_discriminant = neg_half_b^2 - c
@@ -274,7 +274,7 @@ const initialRecord = hit_record(zeros(Point), normalize(ones(Point)), Sphere().
 
         if any(isDiscriminantPositive)
             @fastmath sqrtd = sqrt(quarter_discriminant) # When using fastmath, negative values just give 0
-    
+
             root = neg_half_b - sqrtd
             root2 = neg_half_b + sqrtd
 
@@ -298,7 +298,7 @@ const initialRecord = hit_record(zeros(Point), normalize(ones(Point)), Sphere().
         normal = sphere_normal(sphere, position)
 
         return hit_record(position, normal, sphere.material, minHitT)
-    else 
+    else
         return initialRecord
     end
 end
@@ -338,8 +338,8 @@ function scene_random_spheres()
 		center = [a + 0.9*rand(), -(b + 0.9*rand()), 0.2]
 
 		# skip spheres too close?
-		if norm(center - SA[4,0, 0.2]) < 0.9 continue end 
-			
+		if norm(center - SA[4,0, 0.2]) < 0.9 continue end
+
 		if choose_mat < 4//5
 			# lambertian
 			albedo = rand(Spectrum) .* rand(Spectrum)
@@ -443,7 +443,7 @@ end
 
 #     render!(spectrum_img, HittableList, camera, samples_per_pixel=10)
 
-#     Profile.Allocs.clear(); 
+#     Profile.Allocs.clear();
 
 #     Profile.Allocs.@profile sample_rate=1 render!(spectrum_img, scene, camera)
 
