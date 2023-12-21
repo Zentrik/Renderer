@@ -11,6 +11,8 @@ Delete the definition of `SIMD.any()` if your computer does not support avx (thi
 
 To run a bit faster change `const Fast = false` to `true`.
 
+![image](https://github.com/Zentrik/Renderer/assets/19725290/d842e937-5b3a-4ef6-894f-efcc04415692)
+
 # Benchmarks
 
 Using Claforte's benchmark: 1080p; 1000 samples per pixel; max depth is 16
